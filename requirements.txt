@@ -1,0 +1,15 @@
+numpy~=1.26.4
+scipy~=1.11.4
+pandas~=2.1.4
+matplotlib~=3.8.4
+librosa~=0.11.0
+soundfile~=0.12.1
+soxr~=1.0.0
+torch==2.2.2
+torchaudio==2.2.2
+scikit-learn~=1.4.2
+tqdm~=4.66
+requests~=2.32
+PyYAML~=6.0
+essentia==2.1b6.dev1177
+essentia-tensorflow==2.1b6.dev1177
