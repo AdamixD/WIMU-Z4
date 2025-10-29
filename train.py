@@ -10,8 +10,8 @@ from tqdm import tqdm
 from logging_utils import setup_logger
 from config_paths import RESULTS_DIR
 from datasets import DEAMDataset
-from embeddings import make_extractor, load_audio_mono
-from heads import BiGRUHead, TemporalConvHead, TransformerHead
+from embeddings import LibrosaMFCCChroma, load_audio_mono
+from heads import BiGRUHead
 from metrics import labels_convert
 from trainer import Trainer, TrainConfig
 
@@ -23,13 +23,11 @@ def build_items(
     df, 
     dataset: DEAMDataset, 
     extractor,
-    extractor_name: str,
     split_label: str = "", 
     cached_only: bool = False, 
     labels_scale: str = "19"
 ):
     vmap, amap = dataset.load_dynamic_va_maps()
-    prefer_librosa = getattr(extractor, "name", "") == "librosa_mfcc_chroma"
 
     items = []
     failures = []
@@ -38,14 +36,14 @@ def build_items(
     it = tqdm(
         list(df.itertuples(index=False)),
         total=len(df),
-        desc=f"Preparing {split_label or 'items'} [{extractor_name}]",
+        desc=f"Preparing {split_label or 'items'}",
         smoothing=0.1,
     )
 
     for r in it:
         sid = int(r.song_id)
         apath = Path(r.audio_path)
-        cfile = dataset.cache_file(sid, extractor_name)
+        cfile = dataset.cache_file(sid, "librosa")
 
         try:
             if cfile.exists():
@@ -56,7 +54,7 @@ def build_items(
                     skipped += 1
                     it.set_postfix(cached=cached, computed=computed, failed=failed, skipped=skipped)
                     continue
-                y = load_audio_mono(apath, sr=16000, prefer_librosa=prefer_librosa)
+                y = load_audio_mono(apath, sr=16000)
                 X = extractor(y, 16000)
                 cfile.parent.mkdir(parents=True, exist_ok=True)
                 np.save(cfile, X.astype("float32"))
@@ -99,22 +97,14 @@ def build_items(
     return items, failures
 
 
-def pick_head(name: str, in_dim: int, hidden: int, dropout: float):
-    n = name.lower().strip()
-    if n == "bigru":       
-        return BiGRUHead(in_dim=in_dim, hidden=hidden, dropout=dropout)
-    if n == "tcn":
-        return TemporalConvHead(in_dim=in_dim, hidden=hidden, dropout=dropout)
-    if n == "transformer":
-        return TransformerHead(in_dim=in_dim, hidden=hidden, dropout=dropout)
-    raise ValueError(f"Unknown head '{name}'. Use: bigru | tcn | transformer.")
+def pick_head(in_dim: int, hidden: int, dropout: float):
+    return BiGRUHead(in_dim=in_dim, hidden=hidden, dropout=dropout)
 
 
 def main():
     ap = argparse.ArgumentParser(description="Train dynamic VA on DEAM (run-named outputs).")
     ap.add_argument("--model-name", type=str, default="default", help="Run/model name for results directory.")
-    ap.add_argument("--extractor", default="essentia_musicnn", choices=["essentia_musicnn", "librosa_mfcc_chroma"])
-    ap.add_argument("--head", default="bigru", choices=["bigru", "tcn", "transformer"])
+    ap.add_argument("--head", default="bigru", choices=["bigru"])
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--batch", type=int, default=6)
@@ -166,7 +156,7 @@ def main():
         }
     }, indent=2))
 
-    extractor = make_extractor(args.extractor)
+    extractor = LibrosaMFCCChroma()
     cfg = TrainConfig(
         epochs=args.epochs,
         lr=args.lr,
@@ -182,21 +172,21 @@ def main():
         df_tr = manifest[manifest["song_id"].isin(fold["train_ids"])]
         df_va = manifest[manifest["song_id"].isin(fold["val_ids"])]
         train_items, train_fail = build_items(
-            df_tr, dataset, extractor, args.extractor,
+            df_tr, dataset, extractor,
             split_label="train",
             cached_only=args.cached_only,
             labels_scale=args.labels_scale
         )
         val_items, val_fail = build_items(
-            df_va, dataset, extractor, args.extractor,
+            df_va, dataset, extractor,
             split_label="val",
             cached_only=args.cached_only,
             labels_scale=args.labels_scale
         )
         # in_dim = train_items[0][0].shape[1]
 
-        def build_model(_in):  # _in == in_dim
-            return pick_head(args.head, in_dim=_in, hidden=args.hidden, dropout=args.dropout)
+        def build_model(_in):
+            return pick_head(in_dim=_in, hidden=args.hidden, dropout=args.dropout)
 
         best = trainer.train_fold(i, train_items, val_items, build_model)
         ckpts.append(best)

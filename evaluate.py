@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import essentia.standard as es
 import argparse
 import json
 import numpy as np
@@ -12,10 +11,10 @@ from pathlib import Path
 from tqdm import tqdm
 
 from logging_utils import setup_logger
-from config_paths import RESULTS_DIR, ESSENTIA_DEAM_HEAD_PB
+from config_paths import RESULTS_DIR
 from datasets import DEAMDataset
-from embeddings import make_extractor, load_audio_mono
-from heads import BiGRUHead, TemporalConvHead, TransformerHead
+from embeddings import LibrosaMFCCChroma, load_audio_mono
+from heads import BiGRUHead
 from metrics import metrics_dict, labels_convert
 
 
@@ -36,15 +35,8 @@ def scatter(gt, pr, title, out_png):
     plt.close()
 
 
-def pick_head(name: str, in_dim: int, hidden: int):
-    n = name.lower().strip()
-    if n == "bigru":
-        return BiGRUHead(in_dim=in_dim, hidden=hidden)
-    if n == "tcn":
-        return TemporalConvHead(in_dim=in_dim, hidden=hidden)
-    if n == "transformer":
-        return TransformerHead(in_dim=in_dim, hidden=hidden)
-    raise ValueError(f"Unknown head '{name}'.")
+def pick_head(in_dim: int, hidden: int):
+    return BiGRUHead(in_dim=in_dim, hidden=hidden)
 
 
 def assert_scale(y: np.ndarray, declared: str):
@@ -66,9 +58,7 @@ def assert_scale(y: np.ndarray, declared: str):
 def main():
     ap = argparse.ArgumentParser(description="Evaluate a named run on DEAM with detailed caching logs.")
     ap.add_argument("--model-name", type=str, default="default")
-    ap.add_argument("--extractor", default="essentia_musicnn", choices=["essentia_musicnn", "librosa_mfcc_chroma"])
-    ap.add_argument("--head", default="bigru", choices=["bigru", "tcn", "transformer"])
-    ap.add_argument("--compare-essentia", action="store_true", help="Also evaluate Essentia head on the same embeddings (only valid for MusiCNN embeddings).")
+    ap.add_argument("--head", default="bigru", choices=["bigru"])
     ap.add_argument("--labels-scale", choices=["19", "norm"], default="norm", help="Scale of dynamic labels in DEAM source files.")
     ap.add_argument("--plots-scale", choices=["19", "norm"], default="19", help="Scale used for scatter plots (default: 19).")
     args = ap.parse_args()
@@ -82,8 +72,7 @@ def main():
     splits = json.loads((results_dir / "splits.json").read_text())
     test_ids = splits["test_ids"]
 
-    extractor = make_extractor(args.extractor)
-    prefer_librosa = getattr(extractor, "name", "") == "librosa_mfcc_chroma"
+    extractor = LibrosaMFCCChroma()
 
     vmap, amap = dset.load_dynamic_va_maps()
     test_df = manifest[manifest["song_id"].isin(test_ids)]
@@ -93,21 +82,21 @@ def main():
     it = tqdm(
         list(test_df.itertuples(index=False)),
         total=len(test_df),
-        desc=f"Preparing TEST [{args.extractor}]",
+        desc=f"Preparing TEST",
         smoothing=0.1,
     )
 
     for r in it:
         sid = int(r.song_id)
         apath = Path(r.audio_path)
-        cfile = dset.cache_file(sid, args.extractor)
+        cfile = dset.cache_file(sid, "librosa")
 
         try:
             if cfile.exists():
                 X = np.load(cfile)
                 cached += 1
             else:
-                y = load_audio_mono(apath, sr=16000, prefer_librosa=prefer_librosa)
+                y = load_audio_mono(apath, sr=16000)
                 X = extractor(y, 16000)
                 cfile.parent.mkdir(parents=True, exist_ok=True)
                 np.save(cfile, X.astype("float32"))
@@ -157,7 +146,7 @@ def main():
     models = []
     for p in ck:
         sd = torch.load(p, map_location=device)["model"]
-        m = pick_head(args.head, in_dim=in_dim, hidden=128).to(device)
+        m = pick_head(in_dim=in_dim, hidden=128).to(device)
         m.load_state_dict(sd)
         m.eval()
         models.append(m)
@@ -189,57 +178,8 @@ def main():
     else:
         Y_plot, P_plot = Y, P
 
-    if args.compare_essentia:
-        try:
-            head2 = es.TensorflowPredict2D(
-                graphFilename=str(ESSENTIA_DEAM_HEAD_PB),
-                output="model/Identity",
-            )
-
-            Y2_all, P2_all = [], []
-            for sid, X, Y_item in items:
-                P2_item = head2(X)
-                P2_item = labels_convert(P2_item, src='19', dst='norm').astype("float32")
-
-                T = min(len(Y_item), len(P2_item))
-                if T <= 0:
-                    continue
-                Y2_all.append(Y_item[:T])
-                P2_all.append(P2_item[:T])
-
-            if len(P2_all) == 0:
-                raise RuntimeError("Essentia returned empty predictions after alignment.")
-
-            Y2 = np.concatenate(Y2_all, axis=0)
-            P2 = np.concatenate(P2_all, axis=0)
-
-            mV2 = metrics_dict(Y2[:, 0], P2[:, 0])
-            mA2 = metrics_dict(Y2[:, 1], P2[:, 1])
-            rows.append({
-                "system": "essentia",
-                "CCC_valence": mV2["CCC"], "Pearson_valence": mV2["Pearson"], "R2_valence": mV2["R2"],
-                "RMSE_valence": mV2["RMSE"],
-                "CCC_arousal": mA2["CCC"], "Pearson_arousal": mA2["Pearson"], "R2_arousal": mA2["R2"],
-                "RMSE_arousal": mA2["RMSE"],
-                "CCC_mean": (mV2["CCC"] + mA2["CCC"]) / 2.0
-            })
-
-            if args.plots_scale == "19":
-                Y2_plot = labels_convert(Y2, src="norm", dst="19")
-                P2_plot = labels_convert(P2, src="norm", dst="19")
-            else:
-                Y2_plot, P2_plot = Y2, P2
-
-            scatter(Y_plot[:, 0], P_plot[:, 0], "Valence — Ours (test)", out_plots / "scatter_valence_ours.png")
-            scatter(Y_plot[:, 1], P_plot[:, 1], "Arousal — Ours (test)", out_plots / "scatter_arousal_ours.png")
-            scatter(Y2_plot[:, 0], P2_plot[:, 0], "Valence — Essentia (test)", out_plots / "scatter_valence_ess.png")
-            scatter(Y2_plot[:, 1], P2_plot[:, 1], "Arousal — Essentia (test)", out_plots / "scatter_arousal_ess.png")
-
-        except Exception as e:
-            logger.error(f"Essentia comparison skipped: {e}")
-    else:
-        scatter(Y_plot[:, 0], P_plot[:, 0], "Valence — Ours (test)", out_plots / "scatter_valence_ours.png")
-        scatter(Y_plot[:, 1], P_plot[:, 1], "Arousal — Ours (test)", out_plots / "scatter_arousal_ours.png")
+    scatter(Y_plot[:, 0], P_plot[:, 0], "Valence — Ours (test)", out_plots / "scatter_valence_ours.png")
+    scatter(Y_plot[:, 1], P_plot[:, 1], "Arousal — Ours (test)", out_plots / "scatter_arousal_ours.png")
 
     pd.DataFrame(rows).to_csv(results_dir / "test_metrics_compare.csv", index=False)
     logger.info(f"Saved evaluation results and plots to: {results_dir}")
