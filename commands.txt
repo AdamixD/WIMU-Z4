@@ -1,31 +1,24 @@
 python train.py \
   --model-name essentia_run_norm \
-  --extractor essentia_musicnn \
   --head bigru \
   --labels-scale norm
 
 
 python evaluate.py \
   --model-name essentia_run_norm \
-  --extractor essentia_musicnn \
   --head bigru \
-  --compare-essentia \
   --plots-scale 19 \
   --labels-scale norm
 
 
-python predict.py /Users/adamdabkowski/PycharmProjects/WIMU-Z4/data/DEAM/audio/115.mp3 \
+python predict.py data/DEAM/audio/115.mp3 \
   --model-name essentia_run_norm \
-  --extractor essentia_musicnn \
   --out-scale 19 \
-  --with-essentia \
   --out result.csv \
   --mean
 
 
-python predict.py /Users/adamdabkowski/PycharmProjects/WIMU-Z4/data/DEAM/audio/115.mp3 \
+python predict.py data/DEAM/audio/115.mp3 \
   --model-name essentia_run_norm \
-  --extractor essentia_musicnn \
   --out-scale 19 \
-  --with-essentia \
   --out result.csv
