@@ -20,19 +20,17 @@ class LibrosaMFCCChroma:
     frame_hop_seconds = 1.0
 
     def __init__(self, n_mfcc: int = 20, hop_seconds: float = 1.0):
-        self.librosa = librosa
         self.n_mfcc = int(n_mfcc)
         self.frame_hop_seconds = float(hop_seconds)
 
     def __call__(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        L = self.librosa
         hop = int(sr * self.frame_hop_seconds)
 
-        S = L.feature.melspectrogram(y=audio, sr=sr, n_mels=128, hop_length=hop)
-        S_db = L.power_to_db(S)
+        S = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=128, hop_length=hop)
+        S_db = librosa.power_to_db(S)
 
-        mfcc = L.feature.mfcc(S=S_db, sr=sr, n_mfcc=self.n_mfcc)
-        chroma = L.feature.chroma_cqt(y=audio, sr=sr, hop_length=hop)
+        mfcc = librosa.feature.mfcc(S=S_db, sr=sr, n_mfcc=self.n_mfcc)
+        chroma = librosa.feature.chroma_cqt(y=audio, sr=sr, hop_length=hop)
 
         T = min(mfcc.shape[1], chroma.shape[1])
         E = np.vstack([mfcc[:, :T], chroma[:, :T]]).T.astype(np.float32)
