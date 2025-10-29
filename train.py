@@ -143,7 +143,6 @@ def main():
         "seed": args.seed,
         "test_ids": test_ids,
         "folds": folds,
-        "extractor": args.extractor,
         "head": args.head,
         "train_params": {
             "epochs": args.epochs,
