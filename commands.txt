@@ -1,13 +1,14 @@
 python train.py \
-  --model-name librosa_run_norm \
+  --model-name librosa_run_norm_mse \
   --head bigru \
-  --labels-scale norm
+  --labels-scale norm \
+  --loss mse
 
 
 python evaluate.py \
-  --model-name librosa_run_norm \
+  --model-name librosa_run_norm_mse \
   --head bigru \
-  --plots-scale 19 \
+  --plots-scale norm \
   --labels-scale norm
 
 
