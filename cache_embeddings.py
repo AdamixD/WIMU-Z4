@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from config_paths import RESULTS_DIR
 from datasets import DEAMDataset
-from embeddings import load_audio_mono, make_extractor
+from embeddings import load_audio_mono, LibrosaMFCCChroma
 from logging_utils import setup_logger
 
 
@@ -19,7 +19,6 @@ logger = setup_logger()
 def main():
     ap = argparse.ArgumentParser(description="Cache embeddings for DEAM")
     ap.add_argument("--model-name", type=str, default="shared_cache")
-    ap.add_argument("--extractor", default="essentia_musicnn", choices=["essentia_musicnn", "librosa_mfcc_chroma"])
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
 
@@ -28,19 +27,19 @@ def main():
     report_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = DEAMDataset()
-    extractor = make_extractor(args.extractor)
+    extractor = LibrosaMFCCChroma()
     df = dataset.build_manifest()
     pairs = [(int(r.song_id), Path(r.audio_path)) for r in df.itertuples(index=False)]
     if args.limit: 
         pairs = pairs[:args.limit]
 
     failures = []
-    for song_id, audio_path in tqdm(pairs, desc=f"Caching {args.extractor}"):
-        cfile = dataset.cache_file(song_id, args.extractor)
+    for song_id, audio_path in tqdm(pairs, desc=f"Caching"):
+        cfile = dataset.cache_file(song_id, "librosa")
         if cfile.exists(): 
             continue
         try:
-            y = load_audio_mono(audio_path, sr=16000, prefer_librosa=(args.extractor == "librosa_mfcc_chroma"))
+            y = load_audio_mono(audio_path, sr=16000)
             X = extractor(y, 16000)
             cfile.parent.mkdir(parents=True, exist_ok=True)
             np.save(cfile, X.astype("float32"))
@@ -48,7 +47,7 @@ def main():
             failures.append((str(audio_path), str(e)))
 
     if failures:
-        out = report_dir / f"cache_failures_{args.extractor}.csv"
+        out = report_dir / f"cache_failures.csv"
         with open(out, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["audio_path", "reason"])
