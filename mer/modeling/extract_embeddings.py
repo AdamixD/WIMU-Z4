@@ -82,16 +82,14 @@ def build_manifest(dataset) -> pd.DataFrame:
 
 @app.command()
 def main(
-    dataset_name: Annotated[Literal['DEAM',], typer.Option()] = 'DEAM',
-    input_path: Path = RAW_DATA_DIR,
-    output_path: Path = PROCESSED_DATA_DIR,
+    dataset_name: Annotated[Literal['DEAM',], typer.Option(case_sensitive=False)] = 'DEAM',
     limit: int | None = None
 ):
     extractor = LibrosaMFCCChroma()
     if dataset_name == 'DEAM':
         dataset = DEAMDataset(
-            root_dir=input_path/dataset_name,
-            out_embeddings_dir=output_path/dataset_name
+            root_dir=RAW_DATA_DIR/dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR/dataset_name/'embeddings'
         )
     else:
         raise NotImplemented(dataset_name)
@@ -99,7 +97,7 @@ def main(
     manifest = build_manifest(dataset)[:limit]
     if limit:
         manifest = manifest[:limit]
-    manifest.to_csv(dataset.embeddings_dir/'manifest.csv', index=False)
+    manifest.to_csv(dataset.embeddings_dir.parent/'manifest.csv', index=False)
 
     pairs = [(r.song_id, Path(r.audio_path)) for r in
              manifest.itertuples(index=False)]
