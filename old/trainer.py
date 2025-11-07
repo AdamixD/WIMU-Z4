@@ -96,6 +96,7 @@ def evaluate_model(model, dl, device):
     model.eval()
     Ys = []
     Ps = []
+    # performance improvement only, as no backward propagation is done anyway
     with torch.no_grad():
         for Xb, Yb, Mb in dl:
             Xb = Xb.to(device)
