@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -10,50 +9,11 @@ import numpy as np
 import pandas as pd
 
 from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, SAMPLE_RATE
+from mer.datasets.deam import DEAMDataset
 from mer.extractor import LibrosaMFCCChroma
 
 
 app = typer.Typer()
-
-
-class DEAMDataset:
-    def __init__(self, root_dir: Path, out_embeddings_dir: Path):
-        self.audio_dir = root_dir / 'audio'
-        ann = root_dir / 'annotations/annotations averaged per song'
-        self.val_csv = ann / 'dynamic (per second annotations)/valence.csv'
-        self.aro_csv = ann / 'dynamic (per second annotations)/arousal.csv'
-        self.embeddings_dir = out_embeddings_dir
-
-    @staticmethod
-    def song_id_from_path(p: Path) -> int:
-        m = re.findall(r'(\d+)', p.stem)
-        return int(m[0])
-
-    @staticmethod
-    def _read_dynamic_map(csv_path: Path):
-        df = pd.read_csv(csv_path)
-
-        # first column is song_id, rest are values
-        out = {}
-        for _, row in df.iterrows():
-            song_id = int(row.iloc[0])
-            vals = row.iloc[1:].values.astype('float32')
-
-            # handle NaN values with interpolation if needed
-            if np.isnan(vals).any():
-                n = np.isnan(vals)
-                idx = np.where(~n)[0]
-                if len(idx) > 1:
-                    vals[n] = np.interp(np.where(n)[0], idx, vals[idx])
-
-            out[song_id] = vals
-        return out
-
-    @property
-    def va_maps(self):
-        vmap = self._read_dynamic_map(self.val_csv)
-        amap = self._read_dynamic_map(self.aro_csv)
-        return vmap, amap
 
 
 def load_audio_mono(path, sr=None):
@@ -83,7 +43,7 @@ def build_manifest(dataset) -> pd.DataFrame:
 @app.command()
 def main(
     dataset_name: Annotated[Literal['DEAM',], typer.Option(case_sensitive=False)] = 'DEAM',
-    limit: int | None = None
+    limit: int | None = 30
 ):
     extractor = LibrosaMFCCChroma()
     if dataset_name == 'DEAM':
@@ -94,10 +54,9 @@ def main(
     else:
         raise NotImplemented(dataset_name)
 
-    manifest = build_manifest(dataset)[:limit]
+    manifest = build_manifest(dataset)
     if limit:
         manifest = manifest[:limit]
-    manifest.to_csv(dataset.embeddings_dir.parent/'manifest.csv', index=False)
 
     pairs = [(r.song_id, Path(r.audio_path)) for r in
              manifest.itertuples(index=False)]
@@ -106,7 +65,9 @@ def main(
     for song_id, audio_path in (pbar := tqdm(pairs, desc=f'Extracting...')):
         pbar.set_postfix_str(f'Song ID: {song_id}')
 
-        song_embds_path = dataset.embeddings_dir/str(song_id)
+        song_embds_path = dataset.embeddings_dir/f'{song_id}.npy'
+        manifest.loc[manifest['song_id'] == song_id, 'embeddings_path'] = str(song_embds_path)
+
         if song_embds_path.exists():
             logger.warning(f'Embeddings already exists at {song_embds_path}')
             continue
@@ -117,6 +78,7 @@ def main(
         song_embds_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(song_embds_path, song_embds.astype('float32'))
     logger.success('Processing dataset complete.')
+    manifest.to_csv(dataset.embeddings_dir.parent/'manifest.csv', index=False)
 
 
 if __name__ == '__main__':

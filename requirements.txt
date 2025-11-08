@@ -2,12 +2,17 @@ black
 flake8
 isort
 loguru
-librosa
+librosa~=0.11.0
 pip
 pytest
 python-dotenv
-tqdm
+tqdm~=4.66
 typer
-pandas
-numpy
+requests~=2.32
+torch==2.2.2
+torchaudio==2.2.2
+scikit-learn~=1.4.2
+pandas~=2.1.4
+numpy~=1.26.4
+matplotlib~=3.8.4
 -e .
