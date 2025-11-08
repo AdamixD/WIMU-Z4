@@ -180,7 +180,7 @@ def _init_dataloader(manifest, dataset, args):
 @app.command()
 def main(
     dataset_name: Annotated[Literal['DEAM',], typer.Option(case_sensitive=False)] = 'DEAM',
-    model_path: Path = MODELS_DIR/'model.pkl',
+    # model_path: Path = MODELS_DIR/'model.pkl',
     head: Annotated[Literal['BiGRU',], typer.Option(case_sensitive=False)] = 'BiGRU',
     epochs: int = 20,
     lr: float = 1e-3,
@@ -232,7 +232,7 @@ def main(
 
     (report_dir / 'splits.json').write_text(json.dumps({
         'dataset_name': dataset_name,
-        'model_path': str(model_path),
+        # 'model_path': str(model_path),
         'seed': seed,
         'test_ids': test_ids.tolist(),
         'folds': folds,
@@ -254,9 +254,9 @@ def main(
         pbar.set_postfix_str(f'Fold {i}')
 
         train_manifest = manifest[manifest['song_id'].isin(fold['train_ids'])]
-        valid_manifest = manifest[manifest['song_id'].isin(fold['validation_ids'])]
-
         train_loader = _init_dataloader(train_manifest, dataset, args)
+
+        valid_manifest = manifest[manifest['song_id'].isin(fold['validation_ids'])]
         valid_loader = _init_dataloader(valid_manifest, dataset, args)
 
         logger.info(f'Fold {i}: {len(train_loader.dataset)} train, '

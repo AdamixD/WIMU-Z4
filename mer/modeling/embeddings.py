@@ -22,6 +22,13 @@ def load_audio_mono(path, sr=None):
     return y
 
 
+def extract_embeddings(audio_path, sr=SAMPLE_RATE, extractor=None):
+    if not extractor:
+        extractor = LibrosaMFCCChroma()
+    y = load_audio_mono(audio_path, sr=sr)
+    return extractor(y, sr)
+
+
 def build_manifest(dataset) -> pd.DataFrame:
     files = [
         p for p in dataset.audio_dir.rglob('*')
@@ -74,8 +81,7 @@ def main(
             continue
 
         # Essentia example used mono conversion, but does it have to be mono?
-        y = load_audio_mono(audio_path, sr=SAMPLE_RATE)
-        song_embds = extractor(y, SAMPLE_RATE)
+        song_embds = extract_embeddings(audio_path, extractor=extractor)
         song_embds_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(song_embds_path, song_embds.astype('float32'))
     logger.success('Processing dataset complete.')
