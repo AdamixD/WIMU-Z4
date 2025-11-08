@@ -66,6 +66,24 @@ def build_items(
     return items
 
 
+def _create_history_report(i: int, history: list, report_dir: Path):
+    history = pd.DataFrame(history)
+    history.to_csv(report_dir / f'fold{i}_history.csv', index=False)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(history['epoch'], history['train_CCC_mean'],
+             label='train CCC mean')
+    plt.plot(history['epoch'], history['valid_CCC_mean'],
+             label='validation CCC mean')
+    plt.xlabel('Epoch')
+    plt.ylabel('CCC mean')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(report_dir / f'fold{i}_ccc_curve.png')
+    plt.close()
+
+
 def evaluate_model(model, dl, device):
     Ys = []
     Ps = []
@@ -146,20 +164,7 @@ def train_fold(i: int, args, model: nn.Module, train_loader: DataLoader, validat
         logger.info(
             f'[fold {i}][epoch {epoch}] loss={train_loss:.4f} valid_CCC_mean={score:.3f}')
 
-    history = pd.DataFrame(history)
-    history.to_csv(report_dir/f'fold{i}_history.csv', index=False)
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(history['epoch'], history['train_CCC_mean'], label='train CCC mean')
-    plt.plot(history['epoch'], history['valid_CCC_mean'], label='validation CCC mean')
-    plt.xlabel('Epoch')
-    plt.ylabel('CCC mean')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(report_dir/f'fold{i}_ccc_curve.png')
-    plt.close()
-
+    _create_history_report(i, history, report_dir)
     return best_path
 
 
