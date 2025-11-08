@@ -37,7 +37,8 @@ def build_items(
     items = []
 
     for r in tqdm(
-        list(manifest.itertuples(index=False)), total=len(manifest), desc='Preparing items'
+        manifest.itertuples(index=False), total=len(manifest),
+        desc='Preparing items', leave=False
     ):
         sid = int(r.song_id)
 
@@ -119,7 +120,7 @@ def train_fold(i: int, args, model: nn.Module, train_loader: DataLoader, validat
     patience = args.patience
     history = []
 
-    for epoch in (pbar := tqdm(range(1, args.epochs + 1))):
+    for epoch in (pbar := tqdm(range(1, args.epochs + 1), leave=False)):
         pbar.set_postfix_str(f'Epoch {epoch}')
 
         model.train()
@@ -166,6 +167,14 @@ def train_fold(i: int, args, model: nn.Module, train_loader: DataLoader, validat
 
     _create_history_report(i, history, report_dir)
     return best_path
+
+
+def _init_dataloader(manifest, dataset, args):
+    items = build_items(
+        manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
+    )
+    dset = SongSequenceDataset(items)
+    return DataLoader(dset, batch_size=args.batch_size, collate_fn=pad_and_mask)
 
 
 @app.command()
@@ -241,27 +250,19 @@ def main(
 
     logger.info(f'Training started. Report dir: {report_dir}')
     checkpts = []
-    for i, fold in (pbar := tqdm(enumerate(folds, start=1))):
+    for i, fold in (pbar := tqdm(enumerate(folds, start=1), leave=False)):
         pbar.set_postfix_str(f'Fold {i}')
 
         train_manifest = manifest[manifest['song_id'].isin(fold['train_ids'])]
         valid_manifest = manifest[manifest['song_id'].isin(fold['validation_ids'])]
 
-        train_items = build_items(
-            manifest=train_manifest, dataset=dataset, labels_scale=labels_scale
-        )
-        valid_items = build_items(
-            manifest=valid_manifest, dataset=dataset, labels_scale=labels_scale
-        )
-        logger.info(f'Fold {i}: {len(train_items)} train, {len(valid_items)} validation')
+        train_loader = _init_dataloader(train_manifest, dataset, args)
+        valid_loader = _init_dataloader(valid_manifest, dataset, args)
 
-        train_dset = SongSequenceDataset(train_items)
-        valid_dset = SongSequenceDataset(valid_items)
+        logger.info(f'Fold {i}: {len(train_loader.dataset)} train, '
+                    f'{len(valid_loader.dataset)} validation')
 
-        train_loader = DataLoader(train_dset, batch_size=batch_size, collate_fn=pad_and_mask)
-        valid_loader = DataLoader(valid_dset, batch_size=batch_size, collate_fn=pad_and_mask)
-
-        model = BiGRUHead(in_dim=train_dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
+        model = BiGRUHead(in_dim=train_loader.dataset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
         best_fold = train_fold(i, model=model, args=args, train_loader=train_loader, validate_loader=valid_loader, report_dir=report_dir)
         checkpts.append(best_fold)
 
