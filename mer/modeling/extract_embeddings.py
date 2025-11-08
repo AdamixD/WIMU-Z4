@@ -44,7 +44,7 @@ def build_manifest(dataset) -> pd.DataFrame:
 @app.command()
 def main(
     dataset_name: Annotated[Literal['DEAM',], typer.Option(case_sensitive=False)] = 'DEAM',
-    limit: int | None = 30
+    limit: int | None = None
 ):
     extractor = LibrosaMFCCChroma()
     if dataset_name == 'DEAM':

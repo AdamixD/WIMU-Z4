@@ -253,11 +253,8 @@ def main(
         train_dset = SongSequenceDataset(train_items)
         valid_dset = SongSequenceDataset(valid_items)
 
-        # why is shuffle inconsistent?
-        train_loader = DataLoader(train_dset, batch_size=batch_size, shuffle=True,
-                           collate_fn=pad_and_mask)
-        valid_loader = DataLoader(valid_dset, batch_size=batch_size,
-                           shuffle=False, collate_fn=pad_and_mask)
+        train_loader = DataLoader(train_dset, batch_size=batch_size, collate_fn=pad_and_mask)
+        valid_loader = DataLoader(valid_dset, batch_size=batch_size, collate_fn=pad_and_mask)
 
         model = BiGRUHead(in_dim=train_dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
         best_fold = train_fold(i, model=model, args=args, train_loader=train_loader, validate_loader=valid_loader, report_dir=report_dir)
