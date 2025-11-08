@@ -34,7 +34,8 @@ def build_manifest(dataset) -> pd.DataFrame:
         rows.append({
             'song_id': sid,
             'audio_path': str(f),
-            'annotated': (sid in vmap and sid in amap)
+            'annotated': (sid in vmap and sid in amap),
+            'embeddings_path': None,
         })
     df = pd.DataFrame(rows).dropna(subset=['song_id'])
     return df[df['annotated'] == True].copy()
