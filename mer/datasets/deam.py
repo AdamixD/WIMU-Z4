@@ -1,5 +1,5 @@
-import re
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -7,15 +7,15 @@ import pandas as pd
 
 class DEAMDataset:
     def __init__(self, root_dir: Path, out_embeddings_dir: Path):
-        self.audio_dir = root_dir / 'audio'
-        ann = root_dir / 'annotations/annotations averaged per song'
-        self.val_csv = ann / 'dynamic (per second annotations)/valence.csv'
-        self.aro_csv = ann / 'dynamic (per second annotations)/arousal.csv'
+        self.audio_dir = root_dir / "audio"
+        ann = root_dir / "annotations/annotations averaged per song"
+        self.val_csv = ann / "dynamic (per second annotations)/valence.csv"
+        self.aro_csv = ann / "dynamic (per second annotations)/arousal.csv"
         self.embeddings_dir = out_embeddings_dir
 
     @staticmethod
     def song_id_from_path(p: Path) -> int:
-        m = re.findall(r'(\d+)', p.stem)
+        m = re.findall(r"(\d+)", p.stem)
         return int(m[0])
 
     @staticmethod
@@ -26,7 +26,7 @@ class DEAMDataset:
         out = {}
         for _, row in df.iterrows():
             song_id = int(row.iloc[0])
-            vals = row.iloc[1:].values.astype('float32')
+            vals = row.iloc[1:].values.astype("float32")
 
             # handle NaN values with interpolation if needed
             if np.isnan(vals).any():

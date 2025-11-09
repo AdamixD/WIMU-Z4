@@ -1,7 +1,7 @@
 import random
 
-import torch
 import numpy as np
+import torch
 
 
 def set_seed(seed: int):
@@ -19,8 +19,8 @@ def pad_and_mask(batch: list[tuple[np.ndarray, np.ndarray]]):
         T = X.shape[0]
         pad = maxT - T
         if pad > 0:
-            X = np.pad(X, ((0, pad), (0, 0)), mode='edge')
-            Y = np.pad(Y, ((0, pad), (0, 0)), mode='edge')
+            X = np.pad(X, ((0, pad), (0, 0)), mode="edge")
+            Y = np.pad(Y, ((0, pad), (0, 0)), mode="edge")
             m = np.zeros((maxT,), np.float32)
             m[:T] = 1
         else:

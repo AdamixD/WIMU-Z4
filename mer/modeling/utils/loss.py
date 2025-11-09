@@ -37,11 +37,11 @@ def masked_hybrid(pred, target, mask):
 def make_loss_fn(loss_type: str) -> Callable:
     lt = str(loss_type).lower()
     match lt:
-        case 'masked_mse':
+        case "masked_mse":
             return masked_mse
-        case 'masked_ccc':
+        case "masked_ccc":
             return masked_ccc_loss
-        case 'masked_hybrid':
+        case "masked_hybrid":
             return masked_hybrid
         case _:
             raise NotImplemented(loss_type)

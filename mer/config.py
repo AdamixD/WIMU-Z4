@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from tqdm import tqdm
 from loguru import logger
+from tqdm import tqdm
 
 # Load environment variables from .env file if it exists
 load_dotenv()
