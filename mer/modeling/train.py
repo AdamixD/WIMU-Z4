@@ -120,8 +120,8 @@ def train_fold(
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = make_loss_fn("masked_" + args.loss_type)
 
-    best_path = report_dir / f"fold{i}_best.pkl"
-    last_path = report_dir / f"fold{i}_last.pkl"
+    best_path = report_dir / f"fold{i}_best.pth"
+    last_path = report_dir / f"fold{i}_last.pth"
 
     best = -1e9
     patience = args.patience
@@ -181,7 +181,7 @@ def _init_dataloader(manifest, dataset, args):
 @app.command()
 def main(
     dataset_name: Annotated[Literal["DEAM",], typer.Option(case_sensitive=False)] = "DEAM",
-    # model_path: Path = MODELS_DIR/'model.pkl',
+    # model_path: Path = MODELS_DIR / "model.pth",
     head: Annotated[Literal["BiGRU",], typer.Option(case_sensitive=False)] = "BiGRU",
     epochs: int = 20,
     lr: float = 1e-3,
