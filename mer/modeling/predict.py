@@ -9,7 +9,6 @@ from loguru import logger
 from tqdm import tqdm
 import typer
 
-from mer.heads import BiGRUHead
 from mer.modeling.embeddings import extract_embeddings
 from mer.modeling.utils.metrics import labels_convert
 
@@ -18,23 +17,19 @@ app = typer.Typer()
 
 @app.command(help='Predict dynamic V/A for an audio file (DEAM models).')
 def main(
-    audio_path: Path,
-    training_dir: Path,
+    audio_path: Annotated[Path, typer.Option()],
+    training_dir: Annotated[Path, typer.Option()],
     device: Annotated[
         Literal['cuda', 'cpu'], typer.Option(case_sensitive=False)] = (
     'cuda' if torch.cuda.is_available() else 'cpu'),
     verbose: bool = typer.Option(is_flag=True, default=False),
 ):
     checkpkts = json.loads((training_dir/'best_checkpoints.json').read_text())
-
     song_embds = extract_embeddings(audio_path)
-    in_dim = song_embds.shape[1]
 
     models = []
     for p in tqdm(checkpkts, leave=False):
-        sd = torch.load(p, map_location=device)['model']
-        model = BiGRUHead(in_dim=in_dim).to(device)
-        model.load_state_dict(sd)
+        model = torch.load(p, map_location=device)
         model.eval()
         models.append(model)
 

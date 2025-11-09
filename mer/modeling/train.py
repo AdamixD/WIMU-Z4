@@ -16,8 +16,7 @@ from sklearn.model_selection import train_test_split, KFold
 from tqdm import tqdm
 import typer
 
-from mer.config import MODELS_DIR, PROCESSED_DATA_DIR, REPORTS_DIR, \
-    RAW_DATA_DIR
+from mer.config import PROCESSED_DATA_DIR, REPORTS_DIR, RAW_DATA_DIR
 from mer.datasets.common import SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.heads import BiGRUHead
@@ -113,8 +112,8 @@ def train_fold(i: int, args, model: nn.Module, train_loader: DataLoader, validat
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = make_loss_fn('masked_'+args.loss_type)
 
-    best_path = report_dir / f'fold{i}_best.pt'
-    last_path = report_dir / f'fold{i}_last.pt'
+    best_path = report_dir / f'fold{i}_best.pkl'
+    last_path = report_dir / f'fold{i}_last.pkl'
 
     best = -1e9
     patience = args.patience
@@ -146,15 +145,13 @@ def train_fold(i: int, args, model: nn.Module, train_loader: DataLoader, validat
         row.update({f'valid_{k}': v for k, v in val_m.items()})
         history.append(row)
 
-        torch.save({'model': model.state_dict(), 'opt': opt.state_dict(),
-                    'epoch': epoch}, last_path)
+        torch.save(model, last_path)
 
         score = val_m['CCC_mean']
         if score > best:
             best = score
             patience = args.patience
-            torch.save({'model': model.state_dict(), 'opt': opt.state_dict(),
-                        'epoch': epoch}, best_path)
+            torch.save(model, best_path)
         else:
             patience -= 1
             if patience <= 0:
