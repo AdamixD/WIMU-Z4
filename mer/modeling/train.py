@@ -61,9 +61,9 @@ def build_items(manifest, dataset, labels_scale: str = "19"):
     return items
 
 
-def _create_history_report(i: int, history: list, report_dir: Path):
+def _create_history_report(name: str, history: list, report_dir: Path):
     history = pd.DataFrame(history)
-    history.to_csv(report_dir / f"fold{i}_history.csv", index=False)
+    history.to_csv(report_dir / f"{name}_history.csv", index=False)
 
     plt.figure(figsize=(10, 5))
     plt.plot(history["epoch"], history["train_CCC_mean"], label="train CCC mean")
@@ -73,7 +73,7 @@ def _create_history_report(i: int, history: list, report_dir: Path):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(report_dir / f"fold{i}_ccc_curve.png")
+    plt.savefig(report_dir / f"{name}_ccc_curve.png")
     plt.close()
 
 
@@ -109,22 +109,22 @@ def evaluate_model(model, dl, device):
     }
 
 
-def train_fold(
-    i: int,
-    args,
+def train_model(
+    name: str,
+    args: SimpleNamespace,
     model: nn.Module,
     train_loader: DataLoader,
-    validate_loader: DataLoader,
-    report_dir,
+    test_loader: DataLoader,
+    report_dir: Path,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        opt, mode='max', factor=0.5, patience=5
+    )
     loss_fn = make_loss_fn("masked_" + args.loss_type)
 
-    best_path = report_dir / f"fold{i}_best.pth"
-    last_path = report_dir / f"fold{i}_last.pth"
-
-    best = -1e9
-    patience = args.patience
+    best_score = -1e9
+    patience_counter = 0
     history = []
 
     for epoch in (pbar := tqdm(range(1, args.epochs + 1), leave=False)):
@@ -146,30 +146,30 @@ def train_fold(
 
         train_loss = float(np.mean(losses))
         train_m = evaluate_model(model, train_loader, args.device)
-        val_m = evaluate_model(model, validate_loader, args.device)
+        test_m = evaluate_model(model, test_loader, args.device)
 
         row = {"epoch": epoch, "train_loss": train_loss}
         row.update({f"train_{k}": v for k, v in train_m.items()})
-        row.update({f"valid_{k}": v for k, v in val_m.items()})
+        row.update({f"valid_{k}": v for k, v in test_m.items()})
         history.append(row)
 
-        torch.save(model, last_path)
+        score = test_m["CCC_mean"]
+        scheduler.step(score)
+        logger.debug(f'{scheduler.get_last_lr()=}')
 
-        score = val_m["CCC_mean"]
-        if score > best:
-            best = score
-            patience = args.patience
-            torch.save(model, best_path)
+        if score > best_score:
+            best_score = score
+            patience_counter = 0
         else:
-            patience -= 1
-            if patience <= 0:
-                logger.info(f"[fold {i}] Early stopping at epoch {epoch}")
+            patience_counter += 1
+            if patience_counter >= args.patience:
+                logger.info(f"[{name}] Early stopping at epoch {epoch}")
                 break
 
-        logger.info(f"[fold {i}][epoch {epoch}] loss={train_loss:.4f} valid_CCC_mean={score:.3f}")
+        logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_CCC_mean={score:.3f}")
 
-    _create_history_report(i, history, report_dir)
-    return best_path
+    _create_history_report(name, history, report_dir)
+    return model, best_score
 
 
 def _init_dataloader(manifest, dataset, args):
@@ -183,10 +183,10 @@ def main(
     dataset_name: Annotated[Literal["DEAM",], typer.Option(case_sensitive=False)] = "DEAM",
     # model_path: Path = MODELS_DIR / "model.pth",
     head: Annotated[Literal["BiGRU",], typer.Option(case_sensitive=False)] = "BiGRU",
-    epochs: int = 20,
+    epochs: int = 100,
     lr: float = 1e-3,
     batch_size: int = 6,
-    patience: int = 5,
+    patience: int = 15,
     kfolds: int = 5,
     seed: int = randint(1, 1000000),
     test_size: float = 0.1,
@@ -261,9 +261,11 @@ def main(
     )
 
     logger.info(f"Training started. Report dir: {report_dir}")
-    checkpts = []
-    for i, fold in (pbar := tqdm(enumerate(folds, start=1), leave=False)):
-        pbar.set_postfix_str(f"Fold {i}")
+
+    # K-fold validation for performance estimation only
+    fold_scores = []
+    for i, fold in enumerate(folds, start=1):
+        logger.info(f"Training fold {i}...")
 
         train_manifest = manifest[manifest["song_id"].isin(fold["train_ids"])]
         train_loader = _init_dataloader(train_manifest, dataset, args)
@@ -272,27 +274,80 @@ def main(
         valid_loader = _init_dataloader(valid_manifest, dataset, args)
 
         logger.info(
-            f"Fold {i}: {len(train_loader.dataset)} train, "
+            f"Fold {i} size: {len(train_loader.dataset)} train, "
             f"{len(valid_loader.dataset)} validation"
         )
 
         model = BiGRUHead(
             in_dim=train_loader.dataset.input_dim, hidden_dim=hidden_dim, dropout=dropout
         ).to(device)
-        best_fold = train_fold(
-            i,
+
+        _, score = train_model(
+            name=f"fold_{i}",
             model=model,
             args=args,
             train_loader=train_loader,
-            validate_loader=valid_loader,
+            test_loader=valid_loader,
             report_dir=report_dir,
         )
-        checkpts.append(best_fold)
+        fold_scores.append(score)
 
-    (report_dir / "best_checkpoints.json").write_text(
-        json.dumps(checkpts, indent=2, default=lambda x: str(x))
+    # Report k-fold validation results
+    avg_score = np.mean(fold_scores)
+    std_score = np.std(fold_scores)
+    logger.info(f"K-fold validation CCC: {avg_score:.4f} ± {std_score:.4f}")
+
+    logger.info("Training final model on full training set...")
+
+    train_manifest = manifest[manifest["song_id"].isin(train_ids)]
+    train_loader = _init_dataloader(train_manifest, dataset, args)
+
+    test_manifest = manifest[manifest["song_id"].isin(test_ids)]
+    test_loader = _init_dataloader(test_manifest, dataset, args)
+
+    logger.info(
+        f"Final size: {len(train_loader.dataset)} train, "
+        f"{len(test_loader.dataset)} test"
     )
-    logger.success("Modeling training complete.")
+
+    model = BiGRUHead(
+        in_dim=train_loader.dataset.input_dim,
+        hidden_dim=hidden_dim,
+        dropout=dropout
+    ).to(device)
+
+    model, score = train_model(
+        name="final",
+        model=model,
+        args=args,
+        train_loader=train_loader,
+        test_loader=test_loader,
+        report_dir=report_dir,
+    )
+    model_path = report_dir / "model.pth"
+    torch.save(model, model_path)
+
+    (report_dir / "training_summary.json").write_text(
+        json.dumps({
+            "model_path": str(model_path),
+            "training_size": len(train_manifest),
+            "test_size": len(test_manifest),
+            "test_score": score,
+            "kfold_validation_score_mean": avg_score,
+            "kfold_validation_score_std": std_score,
+            "dataset": dataset_name,
+            "hyperparameters": {
+                "hidden_dim": hidden_dim,
+                "dropout": dropout,
+                "lr": lr,
+                "batch_size": batch_size,
+                "epochs": epochs,
+                "loss_type": loss_type
+            }
+        }, indent=2)
+    )
+
+    logger.success("Model training complete.")
 
 
 if __name__ == "__main__":
