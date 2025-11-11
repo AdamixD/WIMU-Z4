@@ -228,12 +228,7 @@ def main(
 
     folds = []
     for train_idx, val_idx in kf.split(train_indices):
-        folds.append(
-            {
-                "train_indices": train_idx.tolist(),
-                "validation_indices": val_idx.tolist()
-            }
-        )
+        folds.append({"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()})
 
     (report_dir / "splits.json").write_text(
         json.dumps(
@@ -269,18 +264,17 @@ def main(
 
         train_subset = Subset(dset, indices=fold["train_indices"])
         valid_subset = Subset(dset, indices=fold["validation_indices"])
-        train_loader = DataLoader(train_subset, batch_size=args.batch_size,
-                          collate_fn=pad_and_mask)
-        valid_loader = DataLoader(valid_subset, batch_size=args.batch_size,
-                          collate_fn=pad_and_mask)
+        train_loader = DataLoader(
+            train_subset, batch_size=args.batch_size, collate_fn=pad_and_mask
+        )
+        valid_loader = DataLoader(
+            valid_subset, batch_size=args.batch_size, collate_fn=pad_and_mask
+        )
         logger.info(
-            f"Fold {i} size: {len(train_subset)} train, "
-            f"{len(valid_subset)} validation"
+            f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
         )
 
-        model = BiGRUHead(
-            in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout
-        ).to(device)
+        model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
 
         _, score = train_model(
             name=f"fold_{i}",
@@ -301,19 +295,11 @@ def main(
 
     train_subset = Subset(dset, indices=train_indices)
     test_subset = Subset(dset, indices=test_indices)
-    train_loader = DataLoader(train_subset, batch_size=args.batch_size,
-                              collate_fn=pad_and_mask)
-    test_loader = DataLoader(test_subset, batch_size=args.batch_size,
-                              collate_fn=pad_and_mask)
-    logger.info(
-        f"Final size: {len(train_subset)} train, {len(test_subset)} test"
-    )
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, collate_fn=pad_and_mask)
+    test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=pad_and_mask)
+    logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
 
-    model = BiGRUHead(
-        in_dim=dset.input_dim,
-        hidden_dim=hidden_dim,
-        dropout=dropout
-    ).to(device)
+    model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
 
     model, score = train_model(
         name="final",
@@ -327,23 +313,26 @@ def main(
     torch.save(model, model_path)
 
     (report_dir / "training_summary.json").write_text(
-        json.dumps({
-            "model_path": str(model_path),
-            "training_size": len(train_subset),
-            "test_size": len(test_subset),
-            "test_score": score,
-            "kfold_validation_score_mean": avg_score,
-            "kfold_validation_score_std": std_score,
-            "dataset": dataset_name,
-            "hyperparameters": {
-                "hidden_dim": hidden_dim,
-                "dropout": dropout,
-                "lr": lr,
-                "batch_size": batch_size,
-                "epochs": epochs,
-                "loss_type": loss_type
-            }
-        }, indent=2)
+        json.dumps(
+            {
+                "model_path": str(model_path),
+                "training_size": len(train_subset),
+                "test_size": len(test_subset),
+                "test_score": score,
+                "kfold_validation_score_mean": avg_score,
+                "kfold_validation_score_std": std_score,
+                "dataset": dataset_name,
+                "hyperparameters": {
+                    "hidden_dim": hidden_dim,
+                    "dropout": dropout,
+                    "lr": lr,
+                    "batch_size": batch_size,
+                    "epochs": epochs,
+                    "loss_type": loss_type,
+                },
+            },
+            indent=2,
+        )
     )
 
     logger.success("Model training complete.")
