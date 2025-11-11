@@ -14,8 +14,8 @@ app = typer.Typer()
 
 @app.command(help="Predict dynamic V/A for an audio file (DEAM models).")
 def main(
-    audio_path: Annotated[Path, typer.Option()] = "/mnt/c/WIMU-Z4/data/raw/DEAM/audio/2.mp3",
-    model_path: Annotated[Path, typer.Option()] = "/mnt/c/WIMU-Z4/reports/training_2025-11-09_17-51-45",
+    audio_path: Annotated[Path, typer.Option()],
+    model_path: Annotated[Path, typer.Option()],
     device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = (
         "cuda" if torch.cuda.is_available() else "cpu"
     ),
