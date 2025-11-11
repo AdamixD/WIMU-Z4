@@ -12,7 +12,7 @@ import pandas as pd
 from sklearn.model_selection import KFold, train_test_split
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 import typer
 
@@ -118,9 +118,9 @@ def train_model(
     report_dir: Path,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        opt, mode='max', factor=0.5, patience=5
-    )
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     opt, mode='max', factor=0.5, patience=5
+    # )
     loss_fn = make_loss_fn("masked_" + args.loss_type)
 
     best_score = -1e9
@@ -154,8 +154,8 @@ def train_model(
         history.append(row)
 
         score = test_m["CCC_mean"]
-        scheduler.step(score)
-        logger.debug(f'{scheduler.get_last_lr()=}')
+        # scheduler.step(score)
+        # logger.debug(f'{scheduler.get_last_lr()=}')
 
         if score > best_score:
             best_score = score
@@ -170,12 +170,6 @@ def train_model(
 
     _create_history_report(name, history, report_dir)
     return model, best_score
-
-
-def _init_dataloader(manifest, dataset, args):
-    items = build_items(manifest=manifest, dataset=dataset, labels_scale=args.labels_scale)
-    dset = SongSequenceDataset(items)
-    return DataLoader(dset, batch_size=args.batch_size, collate_fn=pad_and_mask)
 
 
 @app.command()
@@ -225,16 +219,20 @@ def main(
 
     set_seed(args.seed)
 
-    song_ids = manifest["song_id"].values
-    train_ids, test_ids = train_test_split(
-        song_ids, test_size=test_size, random_state=seed, shuffle=True
+    n_samples = len(manifest)
+    indices = np.arange(n_samples)
+    train_indices, test_indices = train_test_split(
+        indices, test_size=test_size, random_state=seed, shuffle=True
     )
     kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
 
     folds = []
-    for train, test in kf.split(train_ids):
+    for train_idx, val_idx in kf.split(train_indices):
         folds.append(
-            {"train_ids": song_ids[train].tolist(), "validation_ids": song_ids[test].tolist()}
+            {
+                "train_indices": train_idx.tolist(),
+                "validation_indices": val_idx.tolist()
+            }
         )
 
     (report_dir / "splits.json").write_text(
@@ -243,7 +241,6 @@ def main(
                 "dataset_name": dataset_name,
                 # 'model_path': str(model_path),
                 "seed": seed,
-                "test_ids": test_ids.tolist(),
                 "folds": folds,
                 "head": head,
                 "train_params": {
@@ -262,24 +259,27 @@ def main(
 
     logger.info(f"Training started. Report dir: {report_dir}")
 
+    items = build_items(manifest=manifest, dataset=dataset, labels_scale=args.labels_scale)
+    dset = SongSequenceDataset(items)
+
     # K-fold validation for performance estimation only
     fold_scores = []
     for i, fold in enumerate(folds, start=1):
         logger.info(f"Training fold {i}...")
 
-        train_manifest = manifest[manifest["song_id"].isin(fold["train_ids"])]
-        train_loader = _init_dataloader(train_manifest, dataset, args)
-
-        valid_manifest = manifest[manifest["song_id"].isin(fold["validation_ids"])]
-        valid_loader = _init_dataloader(valid_manifest, dataset, args)
-
+        train_subset = Subset(dset, indices=fold["train_indices"])
+        valid_subset = Subset(dset, indices=fold["validation_indices"])
+        train_loader = DataLoader(train_subset, batch_size=args.batch_size,
+                          collate_fn=pad_and_mask)
+        valid_loader = DataLoader(valid_subset, batch_size=args.batch_size,
+                          collate_fn=pad_and_mask)
         logger.info(
-            f"Fold {i} size: {len(train_loader.dataset)} train, "
-            f"{len(valid_loader.dataset)} validation"
+            f"Fold {i} size: {len(train_subset)} train, "
+            f"{len(valid_subset)} validation"
         )
 
         model = BiGRUHead(
-            in_dim=train_loader.dataset.input_dim, hidden_dim=hidden_dim, dropout=dropout
+            in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout
         ).to(device)
 
         _, score = train_model(
@@ -299,19 +299,18 @@ def main(
 
     logger.info("Training final model on full training set...")
 
-    train_manifest = manifest[manifest["song_id"].isin(train_ids)]
-    train_loader = _init_dataloader(train_manifest, dataset, args)
-
-    test_manifest = manifest[manifest["song_id"].isin(test_ids)]
-    test_loader = _init_dataloader(test_manifest, dataset, args)
-
+    train_subset = Subset(dset, indices=train_indices)
+    test_subset = Subset(dset, indices=test_indices)
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size,
+                              collate_fn=pad_and_mask)
+    test_loader = DataLoader(test_subset, batch_size=args.batch_size,
+                              collate_fn=pad_and_mask)
     logger.info(
-        f"Final size: {len(train_loader.dataset)} train, "
-        f"{len(test_loader.dataset)} test"
+        f"Final size: {len(train_subset)} train, {len(test_subset)} test"
     )
 
     model = BiGRUHead(
-        in_dim=train_loader.dataset.input_dim,
+        in_dim=dset.input_dim,
         hidden_dim=hidden_dim,
         dropout=dropout
     ).to(device)
@@ -330,8 +329,8 @@ def main(
     (report_dir / "training_summary.json").write_text(
         json.dumps({
             "model_path": str(model_path),
-            "training_size": len(train_manifest),
-            "test_size": len(test_manifest),
+            "training_size": len(train_subset),
+            "test_size": len(test_subset),
             "test_score": score,
             "kfold_validation_score_mean": avg_score,
             "kfold_validation_score_std": std_score,
