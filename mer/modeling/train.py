@@ -15,6 +15,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 import typer
+from torch.utils.tensorboard import SummaryWriter
 
 from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
 from mer.datasets.common import SongSequenceDataset
@@ -116,6 +117,7 @@ def train_model(
     train_loader: DataLoader,
     test_loader: DataLoader,
     report_dir: Path,
+    writer: SummaryWriter,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -124,6 +126,7 @@ def train_model(
     loss_fn = make_loss_fn("masked_" + args.loss_type)
 
     best_score = -1e9
+    best_m = {}
     patience_counter = 0
     history = []
 
@@ -153,12 +156,43 @@ def train_model(
         row.update({f"valid_{k}": v for k, v in test_m.items()})
         history.append(row)
 
+        # LOGING TO TENSORBOARD
+        writer.add_scalar(f"{name}/Loss/train", train_loss, epoch)
+        writer.add_scalars(
+            f"{name}/CCC_mean",
+            {"train": train_m["CCC_mean"], "valid": test_m["CCC_mean"]},
+            epoch
+        )
+
+        writer.add_scalars(
+            f"{name}/Valence/metrics",
+            {
+                "CCC": test_m["Valence_CCC"],
+                "Pearson": test_m["Valence_Pearson"],
+                "R2": test_m["Valence_R2"],
+                "RMSE": test_m["Valence_RMSE"],
+            },
+            epoch
+        )
+
+        writer.add_scalars(
+            f"{name}/Arousal/metrics",
+            {
+                "CCC": test_m["Arousal_CCC"],
+                "Pearson": test_m["Arousal_Pearson"],
+                "R2": test_m["Arousal_R2"],
+                "RMSE": test_m["Arousal_RMSE"],
+            },
+            epoch
+        )
+
         score = test_m["CCC_mean"]
         # scheduler.step(score)
         # logger.debug(f'{scheduler.get_last_lr()=}')
 
         if score > best_score:
             best_score = score
+            best_m = test_m
             patience_counter = 0
         else:
             patience_counter += 1
@@ -169,7 +203,7 @@ def train_model(
         logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_CCC_mean={score:.3f}")
 
     _create_history_report(name, history, report_dir)
-    return model, best_score
+    return model, best_m
 
 
 @app.command()
@@ -209,6 +243,7 @@ def main(
 
     report_dir = REPORTS_DIR / f'training_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
     report_dir.mkdir()
+    writer = SummaryWriter(log_dir=str(report_dir / "tensorboard"))
 
     embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
     assert embeddings_dir.is_dir(), "Embeddings dir not found"
@@ -276,6 +311,12 @@ def main(
 
         model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
 
+        # Add model graph to TensorBoard
+        if i == 1:
+            Xb, Yb = valid_subset[0]
+            Xb = torch.tensor(Xb, dtype=torch.float32).unsqueeze(0).to(device)
+            writer.add_graph(model, Xb)
+
         _, score = train_model(
             name=f"fold_{i}",
             model=model,
@@ -283,8 +324,9 @@ def main(
             train_loader=train_loader,
             test_loader=valid_loader,
             report_dir=report_dir,
+            writer=writer,
         )
-        fold_scores.append(score)
+        fold_scores.append(score["CCC_mean"])
 
     # Report k-fold validation results
     avg_score = np.mean(fold_scores)
@@ -308,9 +350,18 @@ def main(
         train_loader=train_loader,
         test_loader=test_loader,
         report_dir=report_dir,
+        writer=writer,
     )
     model_path = report_dir / "model.pth"
     torch.save(model, model_path)
+
+    # Write final scores
+    table = "| Metric | Value |\n|:--|--:|\n"
+    for key, value in score.items():
+        table += f"| {key} | {value:.4f} |\n"
+
+    writer.add_text("Test results", table)
+    writer.close()
 
     (report_dir / "training_summary.json").write_text(
         json.dumps(
@@ -318,7 +369,7 @@ def main(
                 "model_path": str(model_path),
                 "training_size": len(train_subset),
                 "test_size": len(test_subset),
-                "test_score": score,
+                "test_score": score["CCC_mean"],
                 "kfold_validation_score_mean": avg_score,
                 "kfold_validation_score_std": std_score,
                 "dataset": dataset_name,
