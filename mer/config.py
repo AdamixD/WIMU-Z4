@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import torch
 from dotenv import load_dotenv
 from loguru import logger
 from tqdm import tqdm
@@ -17,6 +18,7 @@ logger.remove(0)
 logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
 SAMPLE_RATE = 16000
+DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 DATA_DIR = PROJ_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"

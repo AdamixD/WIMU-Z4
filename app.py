@@ -2,15 +2,13 @@ import io
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import streamlit as st
-import torch
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from mer.config import MODELS_DIR, SAMPLE_RATE
 from mer.modeling.embeddings import extract_embeddings, load_audio_mono
-from mer.modeling.utils.metrics import labels_convert
+from mer.modeling.predict import load_model, DEFAULT_DEVICE, analyze_audio
 
 st.set_page_config(
     page_title="Music Emotion Recognition",
@@ -40,40 +38,6 @@ if "audio_file_name" not in st.session_state:
     st.session_state.audio_file_name = None
 if "scale_mode" not in st.session_state:
     st.session_state.scale_mode = "norm"  # "norm" or "19"
-
-
-def load_model(model_path: Path, device: str = "cpu"):
-    try:
-        model = torch.load(model_path, map_location=device)
-        model.eval()
-        return model
-    except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        return None
-
-
-def analyze_audio(audio_path: Path, model, device: str = "cpu"):
-    try:
-        with st.spinner("Extracting embeddings..."):
-            song_embds = extract_embeddings(audio_path)
-        
-        with st.spinner("Performing inference..."):
-            with torch.no_grad():
-                P = model(torch.from_numpy(song_embds).unsqueeze(0).float().to(device))
-                P = P.squeeze(0).cpu().numpy().clip(-1.0, 1.0).astype("float32")
-        
-        out_data = {
-            "valence_norm": P[:, 0],
-            "arousal_norm": P[:, 1],
-            "valence_19": labels_convert(P[:, 0], src="norm", dst="19"),
-            "arousal_19": labels_convert(P[:, 1], src="norm", dst="19"),
-        }
-        
-        df = pd.DataFrame(out_data)
-        return df
-    except Exception as e:
-        st.error(f"Error during analysis: {str(e)}")
-        return None
 
 
 def format_time(seconds: float) -> str:
@@ -127,14 +91,13 @@ with st.sidebar:
             model_path = Path(f"/tmp/{model_file.name}")
             model_path.write_bytes(model_bytes)
             
-            device = "cuda" if torch.cuda.is_available() else "cpu"
             with st.spinner("Loading model..."):
-                model = load_model(model_path, device=device)
+                model = load_model(model_path)
                 if model is not None:
                     st.session_state.model = model
                     st.session_state.model_path = model_path
                     st.success(f"✅ Model loaded: {model_file.name}")
-                    st.info(f"Device: {device}")
+                    st.info(f"Device: {DEFAULT_DEVICE}")
         except Exception as e:
             st.error(f"Error loading model: {str(e)}")
             st.session_state.model = None
@@ -152,14 +115,13 @@ with st.sidebar:
                 format_func=lambda x: x.name if x else "None"
             )
             if selected_model:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
                 with st.spinner("Loading model..."):
-                    model = load_model(selected_model, device=device)
+                    model = load_model(selected_model)
                     if model is not None:
                         st.session_state.model = model
                         st.session_state.model_path = selected_model
                         st.success(f"✅ Model loaded: {selected_model.name}")
-                        st.info(f"Device: {device}")
+                        st.info(f"Device: {DEFAULT_DEVICE}")
 
 if st.session_state.audio_data is not None:
     st.header("Audio Player")
@@ -193,9 +155,12 @@ if st.session_state.audio_data is not None:
             audio_filename = st.session_state.audio_file_name or "audio_temp.wav"
             temp_audio_path = Path(f"/tmp/{audio_filename}")
             temp_audio_path.write_bytes(st.session_state.audio_bytes)
-            
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            predictions = analyze_audio(temp_audio_path, st.session_state.model, device)
+
+            with st.spinner("Extracting embeddings..."):
+                embds = extract_embeddings(temp_audio_path)
+
+            with st.spinner("Performing inference..."):
+                predictions = analyze_audio(embds, st.session_state.model)
             
             if predictions is not None:
                 st.session_state.predictions = predictions

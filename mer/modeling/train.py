@@ -17,7 +17,7 @@ from tqdm import tqdm
 import typer
 from torch.utils.tensorboard import SummaryWriter
 
-from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
+from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR, DEFAULT_DEVICE
 from mer.datasets.common import SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.heads import BiGRUHead
@@ -227,9 +227,7 @@ def main(
         Literal["19", "norm"],
         typer.Option(case_sensitive=False, help="Scale of dynamic labels in DEAM source files"),
     ] = "norm",
-    device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = (
-        "cuda" if torch.cuda.is_available() else "cpu"
-    ),
+    device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
 ):
     args = SimpleNamespace(**locals())
 
