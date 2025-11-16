@@ -21,17 +21,17 @@ def load_model(model_path: Path, device: str = DEFAULT_DEVICE):
 
 def analyze_audio(song_embds, model, device: str = DEFAULT_DEVICE):
     with torch.no_grad():
-        P = model(torch.from_numpy(song_embds).unsqueeze(0).float().to(
-            device))
-        P = P.squeeze(0).cpu().numpy().clip(-1.0, 1.0).astype(
-            "float32")
+        P = model(torch.from_numpy(song_embds).unsqueeze(0).float().to(device))
+        P = P.squeeze(0).cpu().numpy().clip(-1.0, 1.0).astype("float32")
 
-    return pd.DataFrame({
-        "valence_norm": P[:, 0],
-        "arousal_norm": P[:, 1],
-        "valence_19": labels_convert(P[:, 0], src="norm", dst="19"),
-        "arousal_19": labels_convert(P[:, 1], src="norm", dst="19"),
-    })
+    return pd.DataFrame(
+        {
+            "valence_norm": P[:, 0],
+            "arousal_norm": P[:, 1],
+            "valence_19": labels_convert(P[:, 0], src="norm", dst="19"),
+            "arousal_19": labels_convert(P[:, 1], src="norm", dst="19"),
+        }
+    )
 
 
 @app.command(help="Predict dynamic V/A for an audio file (DEAM models).")
@@ -56,10 +56,10 @@ def main(
 
     if verbose:
         logger.info(
-            f"[MEAN ours norm] V={df['valence_norm'].mean():.3f} A={df['arousal_norm'].mean():.3f}"
+            f"[MEAN ours norm] V={preds['valence_norm'].mean():.3f} A={preds['arousal_norm'].mean():.3f}"
         )
         logger.info(
-            f"[MEAN ours 1..9] V={df['valence_19'].mean():.3f} A={df['arousal_19'].mean():.3f}"
+            f"[MEAN ours 1..9] V={preds['valence_19'].mean():.3f} A={preds['arousal_19'].mean():.3f}"
         )
 
 

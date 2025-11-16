@@ -13,11 +13,11 @@ from sklearn.model_selection import KFold, train_test_split
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import typer
-from torch.utils.tensorboard import SummaryWriter
 
-from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR, DEFAULT_DEVICE
+from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
 from mer.datasets.common import SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.heads import BiGRUHead
@@ -159,9 +159,7 @@ def train_model(
         # LOGING TO TENSORBOARD
         writer.add_scalar(f"{name}/Loss/train", train_loss, epoch)
         writer.add_scalars(
-            f"{name}/CCC_mean",
-            {"train": train_m["CCC_mean"], "valid": test_m["CCC_mean"]},
-            epoch
+            f"{name}/CCC_mean", {"train": train_m["CCC_mean"], "valid": test_m["CCC_mean"]}, epoch
         )
 
         writer.add_scalars(
@@ -172,7 +170,7 @@ def train_model(
                 "R2": test_m["Valence_R2"],
                 "RMSE": test_m["Valence_RMSE"],
             },
-            epoch
+            epoch,
         )
 
         writer.add_scalars(
@@ -183,7 +181,7 @@ def train_model(
                 "R2": test_m["Arousal_R2"],
                 "RMSE": test_m["Arousal_RMSE"],
             },
-            epoch
+            epoch,
         )
 
         score = test_m["CCC_mean"]
@@ -303,9 +301,7 @@ def main(
         valid_loader = DataLoader(
             valid_subset, batch_size=args.batch_size, collate_fn=pad_and_mask
         )
-        logger.info(
-            f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
-        )
+        logger.info(f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation")
 
         model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
 
