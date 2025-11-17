@@ -1,7 +1,9 @@
 from pathlib import Path
-import pandas as pd
-import numpy as np
 import re
+
+import numpy as np
+import pandas as pd
+
 
 class PMEmoDataset:
     def __init__(self, root_dir: Path, out_embeddings_dir: Path):

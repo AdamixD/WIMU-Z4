@@ -79,7 +79,9 @@ def _create_history_report(name: str, history: list, report_dir: Path):
     plt.close()
 
 
-def _create_scatter_plot(Y_true: np.ndarray,Y_pred: np.ndarray,writer: SummaryWriter,report_dir: Path):
+def _create_scatter_plot(
+    Y_true: np.ndarray, Y_pred: np.ndarray, writer: SummaryWriter, report_dir: Path
+):
     for i, dim in enumerate(["valence", "arousal"]):
         p = plt.figure(figsize=(5, 5))
         plt.scatter(Y_true[:, i], Y_pred[:, i], s=8, alpha=0.4)
@@ -139,7 +141,7 @@ def train_model(
     test_loader: DataLoader,
     report_dir: Path,
     writer: SummaryWriter,
-    scatter: bool = False
+    scatter: bool = False,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
