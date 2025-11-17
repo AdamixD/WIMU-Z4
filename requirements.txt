@@ -17,4 +17,6 @@ numpy~=1.26.4
 matplotlib~=3.8.4
 streamlit~=1.28.0
 plotly~=5.17.0
+tensorboard==2.16.2
+optuna==4.6.0
 -e .
