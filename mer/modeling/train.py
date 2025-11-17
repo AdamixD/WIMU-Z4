@@ -264,7 +264,7 @@ def main(
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
     else:
-        raise NotImplemented(dataset_name)
+        raise NotImplementedError(dataset_name)
 
     report_dir = REPORTS_DIR / f'training_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
     report_dir.mkdir()

@@ -48,7 +48,7 @@ def build_manifest(dataset) -> pd.DataFrame:
             }
         )
     df = pd.DataFrame(rows).dropna(subset=["song_id"])
-    return df[df["annotated"] == True].copy()
+    return df[df["annotated"]].copy()
 
 
 @app.command()
@@ -68,7 +68,7 @@ def main(
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
     else:
-        raise NotImplemented(dataset_name)
+        raise NotImplementedError(dataset_name)
 
     manifest = build_manifest(dataset)
     if limit:
@@ -77,7 +77,7 @@ def main(
     pairs = [(r.song_id, Path(r.audio_path)) for r in manifest.itertuples(index=False)]
 
     logger.info(f"Processing {dataset_name} dataset...")
-    for song_id, audio_path in (pbar := tqdm(pairs, desc=f"Extracting...")):
+    for song_id, audio_path in (pbar := tqdm(pairs, desc="Extracting...")):
         pbar.set_postfix_str(f"Song ID: {song_id}")
 
         song_embds_path = dataset.embeddings_dir / f"{song_id}.npy"

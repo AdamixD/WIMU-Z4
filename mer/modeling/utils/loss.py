@@ -44,4 +44,4 @@ def make_loss_fn(loss_type: str) -> Callable:
         case "masked_hybrid":
             return masked_hybrid
         case _:
-            raise NotImplemented(loss_type)
+            raise NotImplementedError(loss_type)
