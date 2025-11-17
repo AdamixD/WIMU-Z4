@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 
 
 class BiGRUHead(nn.Module):
@@ -13,4 +14,5 @@ class BiGRUHead(nn.Module):
     def forward(self, x):
         z, _ = self.gru(x)
         z = self.drop(z)
-        return self.out(z)
+        z = self.out(z)
+        return torch.tanh(z)
