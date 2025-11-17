@@ -79,7 +79,25 @@ def _create_history_report(name: str, history: list, report_dir: Path):
     plt.close()
 
 
-def evaluate_model(model, dl, device):
+def _create_scatter_plot(Y_true: np.ndarray,Y_pred: np.ndarray,writer: SummaryWriter,report_dir: Path):
+    for i, dim in enumerate(["valence", "arousal"]):
+        p = plt.figure(figsize=(5, 5))
+        plt.scatter(Y_true[:, i], Y_pred[:, i], s=8, alpha=0.4)
+        lo = float(min(Y_true[:, i].min(), Y_pred[:, i].min()))
+        hi = float(max(Y_true[:, i].max(), Y_pred[:, i].max()))
+        plt.plot([lo, hi], [lo, hi], lw=1)
+        plt.title(f"{dim}: ground truth vs prediction")
+        plt.xlabel("Ground Truth")
+        plt.ylabel("Prediction")
+        plt.tight_layout()
+        plt.savefig(report_dir / f"scatter_{dim}.png")
+
+        writer.add_figure(f"Scatter/{dim}", p)
+
+        plt.close()
+
+
+def evaluate_model(model, dl, device, writer=None, report_dir=None, scatter=False):
     Ys = []
     Ps = []
 
@@ -95,6 +113,8 @@ def evaluate_model(model, dl, device):
             Ps.append((P * M).reshape(-1, 2)[Mb.reshape(-1) > 0].cpu().numpy())
     Y = np.concatenate(Ys, 0)
     P = np.concatenate(Ps, 0)
+    if scatter:
+        _create_scatter_plot(Y, P, writer, report_dir)
 
     vccc, vp, vr2, vrmse = metrics_dict(Y[:, 0], P[:, 0]).values()
     accc, ap, ar2, armse = metrics_dict(Y[:, 1], P[:, 1]).values()
@@ -119,6 +139,7 @@ def train_model(
     test_loader: DataLoader,
     report_dir: Path,
     writer: SummaryWriter,
+    scatter: bool = False
 ):
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -150,7 +171,7 @@ def train_model(
 
         train_loss = float(np.mean(losses))
         train_m = evaluate_model(model, train_loader, args.device)
-        test_m = evaluate_model(model, test_loader, args.device)
+        test_m = evaluate_model(model, test_loader, args.device, writer, report_dir, scatter)
 
         row = {"epoch": epoch, "train_loss": train_loss}
         row.update({f"train_{k}": v for k, v in train_m.items()})
@@ -351,6 +372,7 @@ def main(
         test_loader=test_loader,
         report_dir=report_dir,
         writer=writer,
+        scatter=True,
     )
     model_path = report_dir / "model.pth"
     torch.save(model, model_path)
