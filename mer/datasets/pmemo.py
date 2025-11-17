@@ -31,6 +31,10 @@ class PMEmoDataset:
                     if len(idx) > 1:
                         arr[n] = np.interp(np.where(n)[0], idx, arr[idx])
 
+            # convert values from [0, 1] to [-1, 1]
+            vals_aro = vals_aro * 2.0 - 1.0
+            vals_val = vals_val * 2.0 - 1.0
+
             a_map[int(song_id)] = vals_aro
             v_map[int(song_id)] = vals_val
 
