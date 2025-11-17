@@ -20,6 +20,7 @@ import typer
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
 from mer.datasets.common import SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
+from mer.datasets.pmemo import PMEmoDataset
 from mer.heads import BiGRUHead
 from mer.modeling.utils.loss import make_loss_fn
 from mer.modeling.utils.metrics import labels_convert, metrics_dict
@@ -206,7 +207,7 @@ def train_model(
 
 @app.command()
 def main(
-    dataset_name: Annotated[Literal["DEAM",], typer.Option(case_sensitive=False)] = "DEAM",
+    dataset_name: Annotated[Literal["DEAM", "PMEmo"], typer.Option(case_sensitive=False)] = "DEAM",
     # model_path: Path = MODELS_DIR / "model.pth",
     head: Annotated[Literal["BiGRU",], typer.Option(case_sensitive=False)] = "BiGRU",
     epochs: int = 100,
@@ -231,6 +232,11 @@ def main(
 
     if dataset_name == "DEAM":
         dataset = DEAMDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+        )
+    elif dataset_name == "PMEmo":
+        dataset = PMEmoDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )

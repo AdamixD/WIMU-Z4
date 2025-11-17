@@ -10,6 +10,7 @@ import typer
 
 from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, SAMPLE_RATE
 from mer.datasets.deam import DEAMDataset
+from mer.datasets.pmemo import PMEmoDataset
 from mer.extractor import LibrosaMFCCChroma
 
 app = typer.Typer()
@@ -52,12 +53,17 @@ def build_manifest(dataset) -> pd.DataFrame:
 
 @app.command()
 def main(
-    dataset_name: Annotated[Literal["DEAM",], typer.Option(case_sensitive=False)] = "DEAM",
+    dataset_name: Annotated[Literal["DEAM", "PMEmo"], typer.Option(case_sensitive=False)] = "DEAM",
     limit: int | None = None,
 ):
     extractor = LibrosaMFCCChroma()
     if dataset_name == "DEAM":
         dataset = DEAMDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+        )
+    elif dataset_name == "PMEmo":
+        dataset = PMEmoDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
