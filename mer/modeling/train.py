@@ -1,3 +1,9 @@
+"""
+Unified training script for all datasets (DEAM, PMEmo, MERGE) with support for:
+- VA regression mode: Continuous valence-arousal prediction
+- Russell 4Q classification mode: 4-quadrant emotion classification
+"""
+
 from datetime import datetime
 import json
 from pathlib import Path
@@ -9,6 +15,7 @@ from loguru import logger
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import KFold, train_test_split
 import torch
 import torch.nn as nn
@@ -18,52 +25,30 @@ from tqdm import tqdm
 import typer
 
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
-from mer.datasets.common import SongSequenceDataset
+from mer.datasets.common import SongClassificationDataset, SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
+from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset
-from mer.heads import BiGRUHead
+from mer.heads import BiGRUClassificationHead, BiGRUHead
+from mer.modeling.utils.data_loaders import (
+    build_items_classification,
+    build_items_merge_classification,
+    build_items_merge_regression,
+    build_items_regression,
+)
 from mer.modeling.utils.loss import make_loss_fn
-from mer.modeling.utils.metrics import labels_convert, metrics_dict
-from mer.modeling.utils.misc import pad_and_mask, set_seed
+from mer.modeling.utils.metrics import (
+    classification_metrics,
+    labels_convert,
+    metrics_dict,
+)
+from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
 
 app = typer.Typer()
 
 
-def build_items(manifest, dataset, labels_scale: str = "19"):
-    vmap, amap = dataset.va_maps
-    items = []
-
-    for r in tqdm(
-        manifest.itertuples(index=False), total=len(manifest), desc="Preparing items", leave=False
-    ):
-        sid = int(r.song_id)
-
-        if not r.annotated:
-            logger.error(f"Song {sid} is not annotated, skipping")
-            continue
-
-        v, a = vmap[sid], amap[sid]
-        L = min(len(v), len(a))
-        if L <= 1:
-            logger.error(f"Song {sid} has less than 2 frames")
-            continue
-
-        Y = np.stack([v[:L], a[:L]], axis=1).astype("float32")
-        Y = labels_convert(Y, src=labels_scale, dst="norm").astype("float32")
-        X = np.load(r.embeddings_path).astype("float32")
-
-        T = min(len(X), len(Y))
-        X, Y = X[:T], Y[:T]
-
-        if len(X) == 0:
-            logger.error(f"Song {sid} has no valid frames")
-            continue
-
-        items.append((X, Y))
-    return items
-
-
-def _create_history_report(name: str, history: list, report_dir: Path):
+def _create_history_report_regression(name: str, history: list, report_dir: Path):
+    """Create history report for regression mode"""
     history = pd.DataFrame(history)
     history.to_csv(report_dir / f"{name}_history.csv", index=False)
 
@@ -79,9 +64,27 @@ def _create_history_report(name: str, history: list, report_dir: Path):
     plt.close()
 
 
+def _create_history_report_classification(name: str, history: list, report_dir: Path):
+    """Create history report for classification mode"""
+    history = pd.DataFrame(history)
+    history.to_csv(report_dir / f"{name}_history.csv", index=False)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(history["epoch"], history["train_Accuracy"], label="train accuracy")
+    plt.plot(history["epoch"], history["valid_Accuracy"], label="validation accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(report_dir / f"{name}_accuracy_curve.png")
+    plt.close()
+
+
 def _create_scatter_plot(
     Y_true: np.ndarray, Y_pred: np.ndarray, writer: SummaryWriter, report_dir: Path
 ):
+    """Create scatter plots for VA regression"""
     for i, dim in enumerate(["valence", "arousal"]):
         p = plt.figure(figsize=(5, 5))
         plt.scatter(Y_true[:, i], Y_pred[:, i], s=8, alpha=0.4)
@@ -99,7 +102,55 @@ def _create_scatter_plot(
         plt.close()
 
 
-def evaluate_model(model, dl, device, writer=None, report_dir=None, scatter=False):
+def _create_confusion_matrix(
+    Y_true: np.ndarray, Y_pred: np.ndarray, writer: SummaryWriter, report_dir: Path
+):
+    """Create confusion matrix for classification"""
+    cm = confusion_matrix(Y_true, Y_pred, labels=[0, 1, 2, 3])
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+
+    quadrant_labels = ["Q1\n(Happy)", "Q2\n(Angry)", "Q3\n(Sad)", "Q4\n(Calm)"]
+    ax.set(
+        xticks=np.arange(cm.shape[1]),
+        yticks=np.arange(cm.shape[0]),
+        xticklabels=quadrant_labels,
+        yticklabels=quadrant_labels,
+        title="Confusion Matrix - Russell 4Q",
+        ylabel="True Quadrant",
+        xlabel="Predicted Quadrant",
+    )
+
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    thresh = cm.max() / 2.0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(
+                j,
+                i,
+                format(cm[i, j], "d"),
+                ha="center",
+                va="center",
+                color="white" if cm[i, j] > thresh else "black",
+            )
+
+    fig.tight_layout()
+    plt.savefig(report_dir / "confusion_matrix.png")
+
+    writer.add_figure("Confusion Matrix", fig)
+    plt.close()
+
+
+# ============================================================================
+# EVALUATION FUNCTIONS
+# ============================================================================
+
+
+def evaluate_model_regression(model, dl, device, writer=None, report_dir=None, scatter=False):
+    """Evaluate model in VA regression mode"""
     Ys = []
     Ps = []
 
@@ -115,7 +166,8 @@ def evaluate_model(model, dl, device, writer=None, report_dir=None, scatter=Fals
             Ps.append((P * M).reshape(-1, 2)[Mb.reshape(-1) > 0].cpu().numpy())
     Y = np.concatenate(Ys, 0)
     P = np.concatenate(Ps, 0)
-    if scatter:
+
+    if scatter and writer and report_dir:
         _create_scatter_plot(Y, P, writer, report_dir)
 
     vccc, vp, vr2, vrmse = metrics_dict(Y[:, 0], P[:, 0]).values()
@@ -133,7 +185,42 @@ def evaluate_model(model, dl, device, writer=None, report_dir=None, scatter=Fals
     }
 
 
-def train_model(
+def evaluate_model_classification(
+    model, dl, device, writer=None, report_dir=None, confusion=False
+):
+    """Evaluate model in Russell 4Q classification mode"""
+    Ys = []
+    Ps = []
+
+    model.eval()
+    with torch.no_grad():
+        for Xb, Yb, Mb in dl:
+            Xb = Xb.to(device)
+            Yb = Yb.to(device)
+            Mb = Mb.to(device)
+
+            logits = model(Xb)
+            pred = torch.argmax(logits, dim=-1)
+
+            valid = Mb > 0
+            Ys.append(Yb[valid].cpu().numpy())
+            Ps.append(pred[valid].cpu().numpy())
+
+    Y = np.concatenate(Ys, 0)
+    P = np.concatenate(Ps, 0)
+
+    if confusion and writer and report_dir:
+        _create_confusion_matrix(Y, P, writer, report_dir)
+
+    return classification_metrics(Y, P)
+
+
+# ============================================================================
+# TRAINING FUNCTIONS
+# ============================================================================
+
+
+def train_model_regression(
     name: str,
     args: SimpleNamespace,
     model: nn.Module,
@@ -143,10 +230,8 @@ def train_model(
     writer: SummaryWriter,
     scatter: bool = False,
 ):
+    """Train model in VA regression mode"""
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #     opt, mode='max', factor=0.5, patience=5
-    # )
     loss_fn = make_loss_fn("masked_" + args.loss_type)
 
     best_score = -1e9
@@ -154,7 +239,7 @@ def train_model(
     patience_counter = 0
     history = []
 
-    for epoch in (pbar := tqdm(range(1, args.epochs + 1), leave=False)):
+    for epoch in (pbar := tqdm(range(1, args.epochs + 1), leave=False)) :
         pbar.set_postfix_str(f"Epoch {epoch}")
 
         model.train()
@@ -172,15 +257,16 @@ def train_model(
             losses.append(float(loss.item()))
 
         train_loss = float(np.mean(losses))
-        train_m = evaluate_model(model, train_loader, args.device)
-        test_m = evaluate_model(model, test_loader, args.device, writer, report_dir, scatter)
+        train_m = evaluate_model_regression(model, train_loader, args.device)
+        test_m = evaluate_model_regression(
+            model, test_loader, args.device, writer, report_dir, scatter
+        )
 
         row = {"epoch": epoch, "train_loss": train_loss}
         row.update({f"train_{k}": v for k, v in train_m.items()})
         row.update({f"valid_{k}": v for k, v in test_m.items()})
         history.append(row)
 
-        # LOGING TO TENSORBOARD
         writer.add_scalar(f"{name}/Loss/train", train_loss, epoch)
         writer.add_scalars(
             f"{name}/CCC_mean", {"train": train_m["CCC_mean"], "valid": test_m["CCC_mean"]}, epoch
@@ -209,8 +295,6 @@ def train_model(
         )
 
         score = test_m["CCC_mean"]
-        # scheduler.step(score)
-        # logger.debug(f'{scheduler.get_last_lr()=}')
 
         if score > best_score:
             best_score = score
@@ -224,15 +308,95 @@ def train_model(
 
         logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_CCC_mean={score:.3f}")
 
-    _create_history_report(name, history, report_dir)
+    _create_history_report_regression(name, history, report_dir)
     return model, best_m
+
+
+def train_model_classification(
+    name: str,
+    args: SimpleNamespace,
+    model: nn.Module,
+    train_loader: DataLoader,
+    test_loader: DataLoader,
+    report_dir: Path,
+    writer: SummaryWriter,
+    confusion: bool = False,
+):
+    """Train model in Russell 4Q classification mode"""
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    loss_fn = make_loss_fn("masked_cross_entropy")
+
+    best_score = -1e9
+    best_m = {}
+    patience_counter = 0
+    history = []
+
+    for epoch in (pbar := tqdm(range(1, args.epochs + 1), leave=False)) :
+        pbar.set_postfix_str(f"Epoch {epoch}")
+
+        model.train()
+        losses = []
+
+        for Xb, Yb, Mb in train_loader:
+            Xb = Xb.to(args.device)
+            Yb = Yb.to(args.device)
+            Mb = Mb.to(args.device)
+            P = model(Xb)
+            loss = loss_fn(P, Yb, Mb)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            losses.append(float(loss.item()))
+
+        train_loss = float(np.mean(losses))
+        train_m = evaluate_model_classification(model, train_loader, args.device)
+        test_m = evaluate_model_classification(
+            model, test_loader, args.device, writer, report_dir, confusion
+        )
+
+        row = {"epoch": epoch, "train_loss": train_loss}
+        row.update({f"train_{k}": v for k, v in train_m.items()})
+        row.update({f"valid_{k}": v for k, v in test_m.items()})
+        history.append(row)
+
+        writer.add_scalar(f"{name}/Loss/train", train_loss, epoch)
+        writer.add_scalars(
+            f"{name}/Metrics", {"Accuracy": test_m["Accuracy"], "F1": test_m["F1"],}, epoch,
+        )
+
+        score = test_m["Accuracy"]
+
+        if score > best_score:
+            best_score = score
+            best_m = test_m
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= args.patience:
+                logger.info(f"[{name}] Early stopping at epoch {epoch}")
+                break
+
+        logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_accuracy={score:.3f}")
+
+    _create_history_report_classification(name, history, report_dir)
+    return model, best_m
+
+
+# ============================================================================
+# MAIN TRAINING COMMAND
+# ============================================================================
 
 
 @app.command()
 def main(
-    dataset_name: Annotated[Literal["DEAM", "PMEmo"], typer.Option(case_sensitive=False)] = "DEAM",
-    # model_path: Path = MODELS_DIR / "model.pth",
-    head: Annotated[Literal["BiGRU",], typer.Option(case_sensitive=False)] = "BiGRU",
+    dataset_name: Annotated[
+        Literal["DEAM", "PMEmo", "MERGE"], typer.Option(case_sensitive=False)
+    ] = "DEAM",
+    prediction_mode: Annotated[
+        Literal["VA", "Russell4Q"],
+        typer.Option(case_sensitive=False, help="VA for regression, Russell4Q for classification"),
+    ] = "VA",
+    head: Annotated[Literal["BiGRU"], typer.Option(case_sensitive=False)] = "BiGRU",
     epochs: int = 100,
     lr: float = 1e-3,
     batch_size: int = 6,
@@ -249,10 +413,35 @@ def main(
         Literal["19", "norm"],
         typer.Option(case_sensitive=False, help="Scale of dynamic labels in DEAM source files"),
     ] = "norm",
+    merge_split: Annotated[
+        Literal["70_15_15", "40_30_30"],
+        typer.Option(case_sensitive=False, help="MERGE dataset split ratio"),
+    ] = "70_15_15",
     device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
 ):
+    """
+    Train model on DEAM, PMEmo, or MERGE dataset.
+    
+    For MERGE dataset:
+    - prediction_mode='VA': Train regression model for continuous valence-arousal
+    - prediction_mode='Russell4Q': Train classification model for 4-quadrant emotions
+    
+    For DEAM/PMEmo datasets:
+    - Only VA mode is supported (regression)
+    """
     args = SimpleNamespace(**locals())
 
+    # Validate prediction mode
+    if prediction_mode not in ["VA", "Russell4Q"]:
+        raise ValueError("prediction_mode must be 'VA' or 'Russell4Q'")
+
+    # Info about automatic label generation for Russell4Q
+    if dataset_name in ["DEAM", "PMEmo"] and prediction_mode == "Russell4Q":
+        logger.info(
+            f"Russell4Q mode on {dataset_name}: Labels will be automatically generated from VA values"
+        )
+
+    # Initialize dataset
     if dataset_name == "DEAM":
         dataset = DEAMDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
@@ -263,153 +452,296 @@ def main(
             root_dir=RAW_DATA_DIR / dataset_name,
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
+    elif dataset_name == "MERGE":
+        dataset = MERGEDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+            mode=prediction_mode,
+        )
     else:
         raise NotImplementedError(dataset_name)
 
-    report_dir = REPORTS_DIR / f'training_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
-    report_dir.mkdir()
+    report_dir = (
+        REPORTS_DIR
+        / f'training_{dataset_name}_{prediction_mode}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
+    )
+    report_dir.mkdir(parents=True)
     writer = SummaryWriter(log_dir=str(report_dir / "tensorboard"))
 
     embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
-    assert embeddings_dir.is_dir(), "Embeddings dir not found"
-
-    manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
-    assert manifest_path.is_file(), "Manifest file not found"
-    manifest = pd.read_csv(manifest_path)
+    assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
 
     set_seed(args.seed)
 
-    n_samples = len(manifest)
-    indices = np.arange(n_samples)
-    train_indices, test_indices = train_test_split(
-        indices, test_size=test_size, random_state=seed, shuffle=True
-    )
-    kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
+    # ========================================================================
+    # MERGE DATASET: Use predefined splits
+    # ========================================================================
+    if dataset_name == "MERGE":
+        train_df, val_df, test_df = dataset.load_train_val_test_splits(merge_split)
 
-    folds = []
-    for train_idx, val_idx in kf.split(train_indices):
-        folds.append({"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()})
+        if prediction_mode == "VA":
+            train_items = build_items_merge_regression(train_df, dataset)
+            val_items = build_items_merge_regression(val_df, dataset)
+            test_items = build_items_merge_regression(test_df, dataset)
+            dset_class = SongSequenceDataset
+            collate_fn = pad_and_mask
+            model_class = BiGRUHead
+            train_fn = train_model_regression
+            eval_fn = evaluate_model_regression
+        else:  # Russell4Q
+            train_items = build_items_merge_classification(train_df, dataset)
+            val_items = build_items_merge_classification(val_df, dataset)
+            test_items = build_items_merge_classification(test_df, dataset)
+            dset_class = SongClassificationDataset
+            collate_fn = pad_and_mask_classification
+            model_class = BiGRUClassificationHead
+            train_fn = train_model_classification
+            eval_fn = evaluate_model_classification
 
-    (report_dir / "splits.json").write_text(
-        json.dumps(
-            {
-                "dataset_name": dataset_name,
-                # 'model_path': str(model_path),
-                "seed": seed,
-                "folds": folds,
-                "head": head,
-                "train_params": {
-                    "epochs": epochs,
-                    "batch_size": batch_size,
-                    "lr": lr,
-                    "patience": patience,
-                    "loss_type": loss_type,
-                    "hidden": hidden_dim,
-                    "dropout": dropout,
-                },
-            },
-            indent=2,
-        )
-    )
+        train_dset = dset_class(train_items)
+        val_dset = dset_class(val_items)
+        test_dset = dset_class(test_items)
 
-    logger.info(f"Training started. Report dir: {report_dir}")
-
-    items = build_items(manifest=manifest, dataset=dataset, labels_scale=args.labels_scale)
-    dset = SongSequenceDataset(items)
-
-    # K-fold validation for performance estimation only
-    fold_scores = []
-    for i, fold in enumerate(folds, start=1):
-        logger.info(f"Training fold {i}...")
-
-        train_subset = Subset(dset, indices=fold["train_indices"])
-        valid_subset = Subset(dset, indices=fold["validation_indices"])
         train_loader = DataLoader(
-            train_subset, batch_size=args.batch_size, collate_fn=pad_and_mask
+            train_dset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True
         )
-        valid_loader = DataLoader(
-            valid_subset, batch_size=args.batch_size, collate_fn=pad_and_mask
+        val_loader = DataLoader(val_dset, batch_size=args.batch_size, collate_fn=collate_fn)
+        test_loader = DataLoader(test_dset, batch_size=args.batch_size, collate_fn=collate_fn)
+
+        logger.info(
+            f"MERGE split {merge_split}: {len(train_items)} train, {len(val_items)} val, {len(test_items)} test"
         )
-        logger.info(f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation")
 
-        model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
+        model = model_class(
+            in_dim=train_dset.input_dim, hidden_dim=hidden_dim, dropout=dropout
+        ).to(device)
 
-        # Add model graph to TensorBoard
-        if i == 1:
-            Xb, Yb = valid_subset[0]
-            Xb = torch.tensor(Xb, dtype=torch.float32).unsqueeze(0).to(device)
-            writer.add_graph(model, Xb)
+        if prediction_mode == "VA":
+            model, score = train_fn(
+                name="merge_va",
+                model=model,
+                args=args,
+                train_loader=train_loader,
+                test_loader=val_loader,
+                report_dir=report_dir,
+                writer=writer,
+                scatter=True,
+            )
+            test_score = eval_fn(model, test_loader, device, writer, report_dir, scatter=True)
+            metric_name = "CCC_mean"
+        else:
+            model, score = train_fn(
+                name="merge_russell4q",
+                model=model,
+                args=args,
+                train_loader=train_loader,
+                test_loader=val_loader,
+                report_dir=report_dir,
+                writer=writer,
+                confusion=True,
+            )
+            test_score = eval_fn(model, test_loader, device, writer, report_dir, confusion=True)
+            metric_name = "Accuracy"
 
-        _, score = train_model(
-            name=f"fold_{i}",
-            model=model,
-            args=args,
-            train_loader=train_loader,
-            test_loader=valid_loader,
-            report_dir=report_dir,
-            writer=writer,
-        )
-        fold_scores.append(score["CCC_mean"])
+        model_path = report_dir / "model.pth"
+        torch.save(model, model_path)
 
-    # Report k-fold validation results
-    avg_score = np.mean(fold_scores)
-    std_score = np.std(fold_scores)
-    logger.info(f"K-fold validation CCC: {avg_score:.4f} ± {std_score:.4f}")
-
-    logger.info("Training final model on full training set...")
-
-    train_subset = Subset(dset, indices=train_indices)
-    test_subset = Subset(dset, indices=test_indices)
-    train_loader = DataLoader(train_subset, batch_size=args.batch_size, collate_fn=pad_and_mask)
-    test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=pad_and_mask)
-    logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
-
-    model = BiGRUHead(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(device)
-
-    model, score = train_model(
-        name="final",
-        model=model,
-        args=args,
-        train_loader=train_loader,
-        test_loader=test_loader,
-        report_dir=report_dir,
-        writer=writer,
-        scatter=True,
-    )
-    model_path = report_dir / "model.pth"
-    torch.save(model, model_path)
-
-    # Write final scores
-    table = "| Metric | Value |\n|:--|--:|\n"
-    for key, value in score.items():
-        table += f"| {key} | {value:.4f} |\n"
-
-    writer.add_text("Test results", table)
-    writer.close()
-
-    (report_dir / "training_summary.json").write_text(
-        json.dumps(
-            {
-                "model_path": str(model_path),
-                "training_size": len(train_subset),
-                "test_size": len(test_subset),
-                "test_score": score["CCC_mean"],
-                "kfold_validation_score_mean": avg_score,
-                "kfold_validation_score_std": std_score,
-                "dataset": dataset_name,
-                "hyperparameters": {
-                    "hidden_dim": hidden_dim,
-                    "dropout": dropout,
-                    "lr": lr,
-                    "batch_size": batch_size,
-                    "epochs": epochs,
-                    "loss_type": loss_type,
+        (report_dir / "training_summary.json").write_text(
+            json.dumps(
+                {
+                    "model_path": str(model_path),
+                    "dataset": dataset_name,
+                    "prediction_mode": prediction_mode,
+                    "merge_split": merge_split,
+                    "training_size": len(train_items),
+                    "validation_size": len(val_items),
+                    "test_size": len(test_items),
+                    "validation_score": score[metric_name],
+                    "test_score": test_score[metric_name],
+                    "hyperparameters": {
+                        "hidden_dim": hidden_dim,
+                        "dropout": dropout,
+                        "lr": lr,
+                        "batch_size": batch_size,
+                        "epochs": epochs,
+                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
+                    },
                 },
-            },
-            indent=2,
+                indent=2,
+            )
         )
-    )
 
+    # ========================================================================
+    # DEAM/PMEmo: Use K-fold cross-validation
+    # ========================================================================
+    else:
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        assert manifest_path.is_file(), f"Manifest file not found: {manifest_path}"
+        manifest = pd.read_csv(manifest_path)
+
+        n_samples = len(manifest)
+        indices = np.arange(n_samples)
+        train_indices, test_indices = train_test_split(
+            indices, test_size=test_size, random_state=seed, shuffle=True
+        )
+        kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
+
+        folds = []
+        for train_idx, val_idx in kf.split(train_indices):
+            folds.append(
+                {"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()}
+            )
+
+        (report_dir / "splits.json").write_text(
+            json.dumps(
+                {
+                    "dataset_name": dataset_name,
+                    "prediction_mode": prediction_mode,
+                    "seed": seed,
+                    "folds": folds,
+                    "head": head,
+                    "train_params": {
+                        "epochs": epochs,
+                        "batch_size": batch_size,
+                        "lr": lr,
+                        "patience": patience,
+                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
+                        "hidden": hidden_dim,
+                        "dropout": dropout,
+                    },
+                },
+                indent=2,
+            )
+        )
+
+        logger.info(f"Training started. Report dir: {report_dir}")
+
+        # Build items based on prediction mode
+        if prediction_mode == "VA":
+            items = build_items_regression(
+                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
+            )
+            dset = SongSequenceDataset(items)
+            collate_fn = pad_and_mask
+            model_class = BiGRUHead
+            train_fn = train_model_regression
+        else:  # Russell4Q with automatic label generation
+            items = build_items_classification(
+                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
+            )
+            dset = SongClassificationDataset(items)
+            collate_fn = pad_and_mask_classification
+            model_class = BiGRUClassificationHead
+            train_fn = train_model_classification
+
+        # K-fold validation
+        fold_scores = []
+        metric_name = "CCC_mean" if prediction_mode == "VA" else "Accuracy"
+
+        for i, fold in enumerate(folds, start=1):
+            logger.info(f"Training fold {i}...")
+
+            train_subset = Subset(dset, indices=fold["train_indices"])
+            valid_subset = Subset(dset, indices=fold["validation_indices"])
+            train_loader = DataLoader(
+                train_subset, batch_size=args.batch_size, collate_fn=collate_fn
+            )
+            valid_loader = DataLoader(
+                valid_subset, batch_size=args.batch_size, collate_fn=collate_fn
+            )
+            logger.info(
+                f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
+            )
+
+            model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+                device
+            )
+
+            if i == 1:
+                Xb, Yb = valid_subset[0]
+                Xb = torch.tensor(Xb, dtype=torch.float32).unsqueeze(0).to(device)
+                writer.add_graph(model, Xb)
+
+            _, score = train_fn(
+                name=f"fold_{i}",
+                model=model,
+                args=args,
+                train_loader=train_loader,
+                test_loader=valid_loader,
+                report_dir=report_dir,
+                writer=writer,
+            )
+            fold_scores.append(score[metric_name])
+
+        avg_score = np.mean(fold_scores)
+        std_score = np.std(fold_scores)
+        logger.info(f"K-fold validation {metric_name}: {avg_score:.4f} ± {std_score:.4f}")
+
+        logger.info("Training final model on full training set...")
+
+        train_subset = Subset(dset, indices=train_indices)
+        test_subset = Subset(dset, indices=test_indices)
+        train_loader = DataLoader(train_subset, batch_size=args.batch_size, collate_fn=collate_fn)
+        test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=collate_fn)
+        logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
+
+        model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+            device
+        )
+
+        # Prepare kwargs based on prediction mode
+        train_kwargs = {
+            "name": "final",
+            "model": model,
+            "args": args,
+            "train_loader": train_loader,
+            "test_loader": test_loader,
+            "report_dir": report_dir,
+            "writer": writer,
+        }
+
+        # Add mode-specific argument
+        if prediction_mode == "VA":
+            train_kwargs["scatter"] = True
+        else:  # Russell4Q
+            train_kwargs["confusion"] = True
+
+        model, score = train_fn(**train_kwargs)
+        model_path = report_dir / "model.pth"
+        torch.save(model, model_path)
+
+        table = "| Metric | Value |\n|:--|--:|\n"
+        for key, value in score.items():
+            if key != "Confusion_Matrix":
+                table += f"| {key} | {value:.4f} |\n"
+
+        writer.add_text("Test results", table)
+
+        (report_dir / "training_summary.json").write_text(
+            json.dumps(
+                {
+                    "model_path": str(model_path),
+                    "dataset": dataset_name,
+                    "prediction_mode": prediction_mode,
+                    "training_size": len(train_subset),
+                    "test_size": len(test_subset),
+                    "test_score": score[metric_name],
+                    "kfold_validation_score_mean": avg_score,
+                    "kfold_validation_score_std": std_score,
+                    "hyperparameters": {
+                        "hidden_dim": hidden_dim,
+                        "dropout": dropout,
+                        "lr": lr,
+                        "batch_size": batch_size,
+                        "epochs": epochs,
+                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
+                    },
+                },
+                indent=2,
+            )
+        )
+
+    writer.close()
     logger.success("Model training complete.")
 
 
