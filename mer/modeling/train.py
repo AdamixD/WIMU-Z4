@@ -29,7 +29,12 @@ from mer.datasets.common import SongClassificationDataset, SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset
-from mer.heads import BiGRUClassificationHead, BiGRUHead
+from mer.heads import (
+    BiGRUClassificationHead,
+    BiGRUHead,
+    CNNLSTMClassificationHead,
+    CNNLSTMHead,
+)
 from mer.modeling.utils.data_loaders import (
     build_items_classification,
     build_items_merge_classification,
@@ -382,6 +387,18 @@ def train_model_classification(
     return model, best_m
 
 
+def _select_head(name: str, mode: str):
+    if name == "BiGRU" and mode == "VA":
+        return BiGRUHead
+    if name == "BiGRU" and mode == "Russell4Q":
+        return BiGRUClassificationHead
+    if name == "CNNLSTM" and mode == "VA":
+        return CNNLSTMHead
+    if name == "CNNLSTM" and mode == "Russell4Q":
+        return CNNLSTMClassificationHead
+    raise ValueError(f"Unsupported head '{name}' for mode '{mode}'")
+
+
 # ============================================================================
 # MAIN TRAINING COMMAND
 # ============================================================================
@@ -396,7 +413,9 @@ def main(
         Literal["VA", "Russell4Q"],
         typer.Option(case_sensitive=False, help="VA for regression, Russell4Q for classification"),
     ] = "VA",
-    head: Annotated[Literal["BiGRU"], typer.Option(case_sensitive=False)] = "BiGRU",
+    head: Annotated[
+        Literal["BiGRU", "CNNLSTM"], typer.Option(case_sensitive=False)
+    ] = "BiGRU",
     epochs: int = 100,
     lr: float = 1e-3,
     batch_size: int = 6,
