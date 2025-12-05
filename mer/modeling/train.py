@@ -43,6 +43,7 @@ from mer.modeling.utils.metrics import (
     metrics_dict,
 )
 from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
+from mer.modeling.utils.report import save_splits, save_training_summary
 
 app = typer.Typer()
 
@@ -473,6 +474,16 @@ def main(
 
     set_seed(args.seed)
 
+    hyperparams = {
+        "epochs": epochs,
+        "patience": patience,
+        "hidden_dim": hidden_dim,
+        "dropout": dropout,
+        "lr": lr,
+        "batch_size": batch_size,
+        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
+    }
+
     # ========================================================================
     # MERGE DATASET: Use predefined splits
     # ========================================================================
@@ -546,29 +557,18 @@ def main(
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
-        (report_dir / "training_summary.json").write_text(
-            json.dumps(
-                {
-                    "model_path": str(model_path),
-                    "dataset": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "merge_split": merge_split,
-                    "training_size": len(train_items),
-                    "validation_size": len(val_items),
-                    "test_size": len(test_items),
-                    "validation_score": score[metric_name],
-                    "test_score": test_score[metric_name],
-                    "hyperparameters": {
-                        "hidden_dim": hidden_dim,
-                        "dropout": dropout,
-                        "lr": lr,
-                        "batch_size": batch_size,
-                        "epochs": epochs,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                    },
-                },
-                indent=2,
-            )
+        save_training_summary(
+            report_dir / "training_summary.json",
+            model_path=model_path,
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=len(train_items),
+            validation_size=len(val_items),
+            test_size=len(test_items),
+            validation_score=score[metric_name],
+            test_score=test_score[metric_name],
+            merge_split=merge_split,
+            hyperparameters=hyperparams
         )
 
     # ========================================================================
@@ -592,26 +592,14 @@ def main(
                 {"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()}
             )
 
-        (report_dir / "splits.json").write_text(
-            json.dumps(
-                {
-                    "dataset_name": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "seed": seed,
-                    "folds": folds,
-                    "head": head,
-                    "train_params": {
-                        "epochs": epochs,
-                        "batch_size": batch_size,
-                        "lr": lr,
-                        "patience": patience,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                        "hidden": hidden_dim,
-                        "dropout": dropout,
-                    },
-                },
-                indent=2,
-            )
+        save_splits(
+            report_dir / "splits.json",
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            folds=folds,
+            head=head,
+            hyperparameters=hyperparams,
+            seed=seed
         )
 
         logger.info(f"Training started. Report dir: {report_dir}")
@@ -717,28 +705,17 @@ def main(
 
         writer.add_text("Test results", table)
 
-        (report_dir / "training_summary.json").write_text(
-            json.dumps(
-                {
-                    "model_path": str(model_path),
-                    "dataset": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "training_size": len(train_subset),
-                    "test_size": len(test_subset),
-                    "test_score": score[metric_name],
-                    "kfold_validation_score_mean": avg_score,
-                    "kfold_validation_score_std": std_score,
-                    "hyperparameters": {
-                        "hidden_dim": hidden_dim,
-                        "dropout": dropout,
-                        "lr": lr,
-                        "batch_size": batch_size,
-                        "epochs": epochs,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                    },
-                },
-                indent=2,
-            )
+        save_training_summary(
+            report_dir / "training_summary.json",
+            model_path=model_path,
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=len(train_subset),
+            test_size=len(test_subset),
+            test_score=score[metric_name],
+            kfold_mean=avg_score,
+            kfold_std=std_score,
+            hyperparameters=hyperparams
         )
 
     writer.close()
