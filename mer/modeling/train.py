@@ -387,16 +387,22 @@ def train_model_classification(
     return model, best_m
 
 
-def _select_head(name: str, mode: str):
-    if name == "BiGRU" and mode == "VA":
-        return BiGRUHead
-    if name == "BiGRU" and mode == "Russell4Q":
-        return BiGRUClassificationHead
-    if name == "CNNLSTM" and mode == "VA":
-        return CNNLSTMHead
-    if name == "CNNLSTM" and mode == "Russell4Q":
-        return CNNLSTMClassificationHead
-    raise ValueError(f"Unsupported head '{name}' for mode '{mode}'")
+def _get_head_class(prediction_mode: str, head_name: str) -> type[nn.Module]:
+    """Return the concrete head class requested via CLI."""
+    registry = {
+        "VA": {
+            "BiGRU": BiGRUHead,
+            "CNNLSTM": CNNLSTMHead,
+        },
+        "Russell4Q": {
+            "BiGRU": BiGRUClassificationHead,
+            "CNNLSTM": CNNLSTMClassificationHead,
+        },
+    }
+    try:
+        return registry[prediction_mode][head_name]
+    except KeyError as err:
+        raise ValueError(f"Head '{head_name}' is not available for mode '{prediction_mode}'") from err
 
 
 # ============================================================================
@@ -504,7 +510,6 @@ def main(
             test_items = build_items_merge_regression(test_df, dataset)
             dset_class = SongSequenceDataset
             collate_fn = pad_and_mask
-            model_class = BiGRUHead
             train_fn = train_model_regression
             eval_fn = evaluate_model_regression
         else:  # Russell4Q
@@ -513,9 +518,10 @@ def main(
             test_items = build_items_merge_classification(test_df, dataset)
             dset_class = SongClassificationDataset
             collate_fn = pad_and_mask_classification
-            model_class = BiGRUClassificationHead
             train_fn = train_model_classification
             eval_fn = evaluate_model_classification
+
+        model_class = _get_head_class(prediction_mode, head)
 
         train_dset = dset_class(train_items)
         val_dset = dset_class(val_items)
@@ -532,7 +538,9 @@ def main(
         )
 
         model = model_class(
-            in_dim=train_dset.input_dim, hidden_dim=hidden_dim, dropout=dropout
+            in_dim=train_dset.input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
         ).to(device)
 
         if prediction_mode == "VA":
@@ -642,7 +650,6 @@ def main(
             )
             dset = SongSequenceDataset(items)
             collate_fn = pad_and_mask
-            model_class = BiGRUHead
             train_fn = train_model_regression
         else:  # Russell4Q with automatic label generation
             items = build_items_classification(
@@ -650,8 +657,9 @@ def main(
             )
             dset = SongClassificationDataset(items)
             collate_fn = pad_and_mask_classification
-            model_class = BiGRUClassificationHead
             train_fn = train_model_classification
+
+        model_class = _get_head_class(prediction_mode, head)
 
         # K-fold validation
         fold_scores = []
@@ -672,9 +680,11 @@ def main(
                 f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
             )
 
-            model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
-                device
-            )
+            model = model_class(
+                in_dim=dset.input_dim,
+                hidden_dim=hidden_dim,
+                dropout=dropout,
+            ).to(device)
 
             if i == 1:
                 Xb, Yb = valid_subset[0]
@@ -704,9 +714,11 @@ def main(
         test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=collate_fn)
         logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
 
-        model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
-            device
-        )
+        model = model_class(
+            in_dim=dset.input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        ).to(device)
 
         # Prepare kwargs based on prediction mode
         train_kwargs = {
