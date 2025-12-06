@@ -48,29 +48,33 @@ class CNNLSTMHead(nn.Module):
         self,
         in_dim: int,
         hidden_dim: int = 128,
-        dropout: float = 0.2,
-        cnn_channels: int = 64,
-        kernel_size: int = 5,
+        dropout: float = 0.4,
+        kernel_size: int = 10,
     ):
         super().__init__()
         padding = kernel_size // 2
         self.conv = nn.Sequential(
-            nn.Conv1d(in_dim, cnn_channels, kernel_size, padding=padding),
-            nn.BatchNorm1d(cnn_channels),
+            nn.Conv1d(in_dim, 64, kernel_size, padding=padding),
             nn.ReLU(),
+            nn.Conv1d(64, 128, kernel_size, padding=padding),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
             nn.Dropout(dropout),
-            nn.Conv1d(cnn_channels, cnn_channels, kernel_size, padding=padding),
-            nn.BatchNorm1d(cnn_channels),
+            nn.Conv1d(128, 128, kernel_size, padding=padding),
             nn.ReLU(),
+            nn.MaxPool1d(4),
             nn.Dropout(dropout),
         )
-        self.lstm = nn.LSTM(
-            input_size=cnn_channels,
-            hidden_size=hidden_dim,
-            num_layers=2,
-            dropout=dropout,
-            bidirectional=True,
-            batch_first=True,
+        self.lstm = nn.Sequential(
+            nn.LSTM(
+                input_size=128,
+                hidden_size=hidden_dim,
+                num_layers=2,
+                dropout=dropout,
+                bidirectional=True,
+                batch_first=True,
+            ),
+            nn.Dropout(dropout),
         )
         self.out = nn.Linear(hidden_dim * 2, 2)
         self.act = nn.Tanh()
@@ -89,30 +93,34 @@ class CNNLSTMClassificationHead(nn.Module):
         self,
         in_dim: int,
         hidden_dim: int = 128,
-        dropout: float = 0.2,
-        cnn_channels: int = 64,
-        kernel_size: int = 5,
+        dropout: float = 0.4,
+        kernel_size: int = 10,
         num_classes: int = 4,
     ):
         super().__init__()
         padding = kernel_size // 2
         self.conv = nn.Sequential(
-            nn.Conv1d(in_dim, cnn_channels, kernel_size, padding=padding),
-            nn.BatchNorm1d(cnn_channels),
+            nn.Conv1d(in_dim, 64, kernel_size, padding=padding),
             nn.ReLU(),
+            nn.Conv1d(64, 128, kernel_size, padding=padding),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
             nn.Dropout(dropout),
-            nn.Conv1d(cnn_channels, cnn_channels, kernel_size, padding=padding),
-            nn.BatchNorm1d(cnn_channels),
+            nn.Conv1d(128, 128, kernel_size, padding=padding),
             nn.ReLU(),
+            nn.MaxPool1d(4),
             nn.Dropout(dropout),
         )
-        self.lstm = nn.LSTM(
-            input_size=cnn_channels,
-            hidden_size=hidden_dim,
-            num_layers=2,
-            dropout=dropout,
-            bidirectional=True,
-            batch_first=True,
+        self.lstm = nn.Sequential(
+            nn.LSTM(
+                input_size=128,
+                hidden_size=hidden_dim,
+                num_layers=2,
+                dropout=dropout,
+                bidirectional=True,
+                batch_first=True,
+            ),
+            nn.Dropout(dropout),
         )
         self.out = nn.Linear(hidden_dim * 2, num_classes)
 
