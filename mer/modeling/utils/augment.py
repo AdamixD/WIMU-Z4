@@ -1,6 +1,7 @@
 import torch
 import torchaudio
 from torchaudio import transforms as T
+import torchaudio.functional as F
 import numpy as np
 import random
 
@@ -35,30 +36,58 @@ def reverb(audio: np.ndarray, sr: int, reverberance=50) -> np.ndarray:
     ir = ir.unsqueeze(0).unsqueeze(0)  # (out_ch, in_ch, n)
     w = torch.nn.functional.conv1d(w.unsqueeze(0), ir, padding=ir_length//2).squeeze(0)
     wet = reverberance / 100.0
-    w = (1 - wet) * np_to_torch_waveform(audio) + wet * w
+
+    if w.shape[-1] != audio.shape[-1]:
+        min_len = min(w.shape[-1], audio.shape[-1])
+        w = w[..., :min_len]
+        audio_t = np_to_torch_waveform(audio)[..., :min_len]
+    else:
+        audio_t = np_to_torch_waveform(audio)
+
+    w = (1 - wet) * audio_t + wet * w
     return torch_to_np_waveform(w)
 
 def lowpass(audio: np.ndarray, sr: int, cutoff=3000) -> np.ndarray:
     w = np_to_torch_waveform(audio)
-    filt = T.LowpassBiquad(sr, cutoff)
-    w = filt(w)
+    w = F.lowpass_biquad(
+        w,
+        sample_rate=sr,
+        cutoff_freq=cutoff
+    )
     return torch_to_np_waveform(w)
 
 def highpass(audio: np.ndarray, sr: int, cutoff=300) -> np.ndarray:
     w = np_to_torch_waveform(audio)
-    filt = T.HighpassBiquad(sr, cutoff)
-    w = filt(w)
+    w = F.highpass_biquad(
+        w,
+        sample_rate=sr,
+        cutoff_freq=cutoff
+    )
     return torch_to_np_waveform(w)
 
 def bandpass(audio: np.ndarray, sr: int, f_min=300, f_max=3000) -> np.ndarray:
     w = np_to_torch_waveform(audio)
-    w = T.HighpassBiquad(sr, f_min)(w)
-    w = T.LowpassBiquad(sr, f_max)(w)
+
+    w = F.highpass_biquad(
+        w,
+        sample_rate=sr,
+        cutoff_freq=f_min
+    )
+
+    w = F.lowpass_biquad(
+        w,
+        sample_rate=sr,
+        cutoff_freq=f_max
+    )
     return torch_to_np_waveform(w)
 
 def pitch_shift(audio: np.ndarray, sr: int, n_steps=None) -> np.ndarray:
     if n_steps is None:
         n_steps = random.uniform(-2.0, 2.0)  # semitones
     w = np_to_torch_waveform(audio)
-    w_shifted = T.PitchShift(sr, n_steps=n_steps)(w)
+    w_shifted = F.pitch_shift(
+        waveform=w,
+        sample_rate=sr,
+        n_steps=n_steps
+    )
     return torch_to_np_waveform(w_shifted)
