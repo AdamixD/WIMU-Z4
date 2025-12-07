@@ -83,7 +83,7 @@ def create_loader(items, config, batch_size, shuffle=False):
         shuffle=shuffle,
     )
 
-def prepare_datasets_merge(dataset, merge_split, components, batch_size, augment_manifest=None, augment_size=0.3, augment_name=None):
+def prepare_datasets_merge(dataset, merge_split, components, batch_size, augment_manifests=None, augment_size=0.3):
     train_df, val_df, test_df = dataset.load_train_val_test_splits(merge_split)
     train_items = components["build_items_df"](train_df, dataset)
     val_items   = components["build_items_df"](val_df, dataset)
@@ -92,14 +92,18 @@ def prepare_datasets_merge(dataset, merge_split, components, batch_size, augment
     val_dset   = components["dataset_class"](val_items)
     test_dset  = components["dataset_class"](test_items)
 
-    if augment_manifest is not None:
+    if augment_manifests is not None:
         train_song_ids = train_df['song_id'].tolist()
         subset_size = int(augment_size * len(train_song_ids))
-        aug_song_ids = random.sample(train_song_ids, subset_size)
-        aug_train = augment_manifest[augment_manifest['song_id'].isin(aug_song_ids)]
-        augment_items = components["build_items_df"](aug_train, dataset, augment_name=augment_name)
-        augment_dset = components["dataset_class"](augment_items)
-        train_dset = ConcatDataset([train_dset, augment_dset])
+        seed = random.randint(0, 1000)
+        for i, (augment_manifest, augment_name) in enumerate(augment_manifests):
+            rng = random.Random(seed)
+            aug_song_ids = rng.sample(train_song_ids, subset_size)
+            aug_train = augment_manifest[augment_manifest['song_id'].isin(aug_song_ids)]
+            augment_items = components["build_items_df"](aug_train, dataset, augment_name=augment_name)
+            augment_dset = components["dataset_class"](augment_items)
+            train_dset = ConcatDataset([train_dset, augment_dset])
+            seed += i
 
     train_loader = create_loader(train_dset, components, batch_size, shuffle=True)
     val_loader   = create_loader(val_dset,   components, batch_size)
@@ -111,23 +115,30 @@ def prepare_datasets_merge(dataset, merge_split, components, batch_size, augment
         "test_loader": test_loader
     }
 
-def prepare_kfold_dataset(manifest, dataset, folds, components, batch_size, labels_scale=None, augment_manifest=None, augment_size=0.3):
+def prepare_kfold_dataset(manifest, dataset, folds, components, batch_size, labels_scale=None, augment_manifests=None, augment_size=0.3):
     items = components["build_items_manifest"](manifest=manifest, dataset=dataset, labels_scale=labels_scale)
     dset = components["dataset_class"](items)
-    if augment_manifest is not None:
-        augment_items = components["build_items_manifest"](manifest=augment_manifest, dataset=dataset, labels_scale=labels_scale)
-        augment_dset = components["dataset_class"](augment_items)
+    if augment_manifests is not None:
+        augment_dsets = []
+        for augment_manifest, _ in augment_manifests:
+            augment_items = components["build_items_manifest"](manifest=augment_manifest, dataset=dataset, labels_scale=labels_scale)
+            augment_dset = components["dataset_class"](augment_items)
+            augment_dsets.append(augment_dset)
 
     def fold_generator():
         for idx, fold in enumerate(folds, start=1):
 
             train_subset = Subset(dset, fold["train_indices"])
-            if augment_manifest is not None:
+            if augment_manifests is not None:
                 train_indices = fold["train_indices"]
                 subset_size = int(augment_size * len(train_indices))
-                aug_indices = random.sample(train_indices, subset_size)
-                aug_train = Subset(augment_dset, aug_indices)
-                train_subset = ConcatDataset([train_subset, aug_train])
+                seed = random.randint(0, 1000)
+                for i, augment_dset in enumerate(augment_dsets):
+                    rng = random.Random(seed)
+                    aug_indices = rng.sample(train_indices, subset_size)
+                    aug_train = Subset(augment_dset, aug_indices)
+                    train_subset = ConcatDataset([train_subset, aug_train])
+                    seed += i
 
             val_subset   = Subset(dset, fold["validation_indices"])
 
@@ -141,19 +152,22 @@ def prepare_kfold_dataset(manifest, dataset, folds, components, batch_size, labe
         "folds": fold_generator()
     }
 
-def prepare_datasets(dataset, manifest, train_indices, test_indices, components, batch_size, labels_scale=None, augment_manifest=None, augment_size=0.3):
+def prepare_datasets(dataset, manifest, train_indices, test_indices, components, batch_size, labels_scale=None, augment_manifests=None, augment_size=0.3):
 
     items = components["build_items_manifest"](manifest=manifest, dataset=dataset, labels_scale=labels_scale)
     dset = components["dataset_class"](items)
     train_subset = Subset(dset, indices=train_indices)
     test_subset = Subset(dset, indices=test_indices)
-    if augment_manifest is not None:
-        augment_items = components["build_items_manifest"](manifest=augment_manifest, dataset=dataset, labels_scale=labels_scale)
-        augment_dset = components["dataset_class"](augment_items)
+    if augment_manifests is not None:
         subset_size = int(augment_size * len(train_indices))
-        aug_indices = random.sample(train_indices, subset_size)
-        aug_train = Subset(augment_dset, aug_indices)
-        train_subset = ConcatDataset([train_subset, aug_train])
+        seed = random.randint(0, 1000)
+        for i, (augment_manifest, _) in enumerate(augment_manifests):
+            rng = random.Random(seed)
+            augment_items = components["build_items_manifest"](manifest=augment_manifest, dataset=dataset, labels_scale=labels_scale)
+            augment_dset = components["dataset_class"](augment_items)
+            aug_indices = rng.sample(train_indices, subset_size)
+            aug_train = Subset(augment_dset, aug_indices)
+            train_subset = ConcatDataset([train_subset, aug_train])
     
 
     train_loader = create_loader(train_subset, components, batch_size, shuffle=True)

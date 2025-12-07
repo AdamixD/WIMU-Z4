@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from random import randint
 from types import SimpleNamespace
-from typing import Annotated, Literal
+from typing import Annotated, Literal, List
 
 from loguru import logger
 from matplotlib import pyplot as plt
@@ -426,9 +426,8 @@ def main(
         typer.Option(case_sensitive=False, help="MERGE dataset split ratio"),
     ] = "70_15_15",
     device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
-    augment: Annotated[
-    Literal[None, "shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"], typer.Option(case_sensitive=False)
-    ] = None,
+    augments: Annotated[
+    List[str], typer.Option(case_sensitive=False)] = [],
     augment_size: float = 0.3,
 ):
     """
@@ -446,6 +445,13 @@ def main(
     # Validate prediction mode
     if prediction_mode not in ["VA", "Russell4Q"]:
         raise ValueError("prediction_mode must be 'VA' or 'Russell4Q'")
+    
+    # Validate augments names
+    ALLOWED_AUGMENTS = ["shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"]
+    for a in augments:
+        if a not in ALLOWED_AUGMENTS:
+            raise ValueError(f"Invalid augmentation name: {a}. Must be {ALLOWED_AUGMENTS}")
+
 
     # Info about automatic label generation for Russell4Q
     if dataset_name in ["DEAM", "PMEmo"] and prediction_mode == "Russell4Q":
@@ -473,23 +479,26 @@ def main(
     else:
         raise NotImplementedError(dataset_name)
 
-    suffix = f"_{augment}" if augment is not None else ""
+    embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
+    assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
+    aug_manifests = []
+    if augments:
+        for augment in augments:
+            aug_embeddings_dir = PROCESSED_DATA_DIR / dataset_name / f"embeddings_{augment}"
+            assert aug_embeddings_dir.is_dir(), f"Augment embeddings dir not found: {aug_embeddings_dir}"
+            aug_manifest_path = aug_embeddings_dir / "manifest.csv"
+            assert aug_manifest_path.is_file(), f"Augment manifest file not found: {aug_manifest_path}"
+            aug_manifest = pd.read_csv(aug_manifest_path)
+            aug_manifests.append((aug_manifest, augment))
+
+    suffix = "_" + "_".join(augments) if augments else ""
+    
     report_dir = (
         REPORTS_DIR
         / f'training_{dataset_name}_{prediction_mode}{suffix}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
     )
     report_dir.mkdir(parents=True)
     writer = SummaryWriter(log_dir=str(report_dir / "tensorboard"))
-
-    embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
-    assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
-    aug_manifest = None
-    if augment:
-        aug_embeddings_dir = PROCESSED_DATA_DIR / dataset_name / f"embeddings{suffix}"
-        assert aug_embeddings_dir.is_dir(), f"Augment embeddings dir not found: {embeddings_dir}"
-        aug_manifest_path = aug_embeddings_dir / "manifest.csv"
-        assert aug_manifest_path.is_file(), f"Augment manifest file not found: {aug_manifest_path}"
-        aug_manifest = pd.read_csv(aug_manifest_path)
 
     set_seed(args.seed)
 
@@ -508,7 +517,7 @@ def main(
     # ========================================================================
     if dataset_name == "MERGE":
         components = get_mode_components(prediction_mode)
-        data = prepare_datasets_merge(dataset, merge_split, components, args.batch_size, aug_manifest, augment_size, augment)
+        data = prepare_datasets_merge(dataset, merge_split, components, args.batch_size, aug_manifests, augment_size)
 
         train_s = len(data["train_loader"].dataset)
         val_s = len(data["val_loader"].dataset)
@@ -553,6 +562,7 @@ def main(
         torch.save(model, model_path)
 
         metric_name = components["metric_name"]
+        # TODO add augmentations to summary
         save_training_summary(
             report_dir / "training_summary.json",
             model_path=model_path,
@@ -592,7 +602,7 @@ def main(
         # K-fold validation
         fold_scores = []
 
-        kfolds = prepare_kfold_dataset(manifest, dataset, split_data["folds"], components, batch_size, labels_scale, aug_manifest, augment_size)
+        kfolds = prepare_kfold_dataset(manifest, dataset, split_data["folds"], components, batch_size, labels_scale, aug_manifests, augment_size)
 
         for i, train_loader, valid_loader in kfolds["folds"]:
             logger.info(f"Training fold {i}...")
@@ -625,7 +635,7 @@ def main(
 
         logger.info("Training final model on full training set...")
 
-        data = prepare_datasets(dataset, manifest, split_data["train_indices"], split_data["test_indices"], components, batch_size, labels_scale, aug_manifest, augment_size)
+        data = prepare_datasets(dataset, manifest, split_data["train_indices"], split_data["test_indices"], components, batch_size, labels_scale, aug_manifests, augment_size)
         logger.info(f"Final size: {len(data["train_loader"].dataset)} train, {len(data["test_loader"].dataset)} test")
 
         model = components["model_class"](in_dim=data["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
@@ -660,6 +670,7 @@ def main(
 
         writer.add_text("Test results", table)
 
+        # TODO add augmentations to summary
         save_training_summary(
             report_dir / "training_summary.json",
             model_path=model_path,
