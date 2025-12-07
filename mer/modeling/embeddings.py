@@ -13,6 +13,15 @@ from mer.datasets.deam import DEAMDataset
 from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset
 from mer.extractor import LibrosaMFCCChroma
+from mer.modeling.utils.augment import (
+    shift,
+    gain,
+    reverb,
+    lowpass,
+    highpass,
+    bandpass,
+    pitch_shift
+)
 
 app = typer.Typer()
 
@@ -23,14 +32,30 @@ def load_audio_mono(path, sr=None):
     return y
 
 
-def extract_embeddings(audio_path, sr=SAMPLE_RATE, extractor=None):
+def extract_embeddings(audio_path, sr=SAMPLE_RATE, extractor=None, augment_type=None):
     if not extractor:
         extractor = LibrosaMFCCChroma()
     y = load_audio_mono(audio_path, sr=sr)
+
+    if augment_type == "shift":
+        y = shift(y)
+    elif augment_type == "gain":
+        y = gain(y)
+    elif augment_type == "reverb":
+        y = reverb(y, sr)
+    elif augment_type == "lowpass":
+        y = lowpass(y, sr)
+    elif augment_type == "highpass":
+        y = highpass(y, sr)
+    elif augment_type == "bandpass":
+        y = bandpass(y, sr)
+    elif augment_type == "pitch_shift":
+        y = pitch_shift(y, sr)
+
     return extractor(y, sr)
 
 
-def build_manifest(dataset) -> pd.DataFrame:
+def build_manifest(dataset, augment=None) -> pd.DataFrame:
     files = [
         p
         for p in dataset.audio_dir.rglob("*")
@@ -45,6 +70,7 @@ def build_manifest(dataset) -> pd.DataFrame:
                 "song_id": sid,
                 "audio_path": str(f),
                 "annotated": (sid in vmap and sid in amap),
+                "augment_type": augment,
                 "embeddings_path": None,
             }
         )
@@ -58,22 +84,26 @@ def main(
         Literal["DEAM", "PMEmo", "MERGE"], typer.Option(case_sensitive=False)
     ] = "DEAM",
     limit: int | None = None,
+   augment: Annotated[
+    Literal[None, "shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"], typer.Option(case_sensitive=False)
+    ] = None
 ):
     extractor = LibrosaMFCCChroma()
+    suffix = f"_{augment}" if augment is not None else ""
     if dataset_name == "DEAM":
         dataset = DEAMDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
-            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / f"embeddings{suffix}",
         )
     elif dataset_name == "PMEmo":
         dataset = PMEmoDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
-            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / f"embeddings{suffix}",
         )
     elif dataset_name == "MERGE":
         dataset = MERGEDataset(
             root_dir=RAW_DATA_DIR / dataset_name,
-            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / f"embeddings{suffix}",
             mode="VA",
         )
     else:
@@ -94,7 +124,8 @@ def main(
                         "song_id": song_id,
                         "audio_path": str(audio_path),
                         "annotated": True,
-                        "embeddings_path": str(dataset.embeddings_dir / f"{song_id}.npy"),
+                        "augment_type": augment,
+                        "embeddings_path": str(dataset.embeddings_dir / f"{song_id}{suffix}.npy"),
                     }
                 )
             else:
@@ -114,7 +145,7 @@ def main(
         ) :
             song_id = row["song_id"]
             audio_path = Path(row["audio_path"])
-            song_embds_path = dataset.embeddings_dir / f"{song_id}.npy"
+            song_embds_path = dataset.embeddings_dir / f"{song_id}{suffix}.npy"
 
             pbar.set_postfix_str(f"Song ID: {song_id}")
 
@@ -122,18 +153,18 @@ def main(
                 continue
 
             try:
-                song_embds = extract_embeddings(audio_path, extractor=extractor)
+                song_embds = extract_embeddings(audio_path, extractor=extractor, augment_type=augment)
                 np.save(song_embds_path, song_embds.astype("float32"))
             except Exception as e:
                 logger.error(f"Failed to extract embeddings for {song_id}: {e}")
 
-        manifest = manifest[["song_id", "audio_path", "annotated", "embeddings_path"]]
-        manifest.to_csv(dataset.embeddings_dir.parent / "manifest.csv", index=False)
+        manifest = manifest[["song_id", "audio_path", "annotated", "augment_type", "embeddings_path"]]
+        manifest.to_csv(dataset.embeddings_dir / "manifest.csv", index=False)
         logger.success(f"MERGE embeddings and manifest saved to {dataset.embeddings_dir.parent}")
 
     else:
         # Original code for DEAM and PMEmo
-        manifest = build_manifest(dataset)
+        manifest = build_manifest(dataset, augment=augment)
         if limit:
             manifest = manifest[:limit]
 
@@ -143,19 +174,19 @@ def main(
         for song_id, audio_path in (pbar := tqdm(pairs, desc="Extracting...")) :
             pbar.set_postfix_str(f"Song ID: {song_id}")
 
-            song_embds_path = dataset.embeddings_dir / f"{song_id}.npy"
+            song_embds_path = dataset.embeddings_dir / f"{song_id}{suffix}.npy"
             manifest.loc[manifest["song_id"] == song_id, "embeddings_path"] = str(song_embds_path)
 
             if song_embds_path.exists():
                 logger.warning(f"Embeddings already exists at {song_embds_path}")
                 continue
 
-            song_embds = extract_embeddings(audio_path, extractor=extractor)
+            song_embds = extract_embeddings(audio_path, extractor=extractor, augment_type=augment)
             song_embds_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(song_embds_path, song_embds.astype("float32"))
         logger.success("Processing dataset complete.")
-        manifest = manifest[["song_id", "audio_path", "annotated", "embeddings_path"]]
-        manifest.to_csv(dataset.embeddings_dir.parent / "manifest.csv", index=False)
+        manifest = manifest[["song_id", "audio_path", "annotated", "augment_type", "embeddings_path"]]
+        manifest.to_csv(dataset.embeddings_dir / "manifest.csv", index=False)
 
 
 if __name__ == "__main__":

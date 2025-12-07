@@ -44,6 +44,13 @@ from mer.modeling.utils.metrics import (
 )
 from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
 from mer.modeling.utils.report import save_splits, save_training_summary
+from mer.modeling.utils.train_utils import (
+    prepare_kfold,
+    prepare_kfold_dataset,
+    prepare_datasets,
+    prepare_datasets_merge,
+    get_mode_components
+)
 
 app = typer.Typer()
 
@@ -419,6 +426,10 @@ def main(
         typer.Option(case_sensitive=False, help="MERGE dataset split ratio"),
     ] = "70_15_15",
     device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
+    augment: Annotated[
+    Literal[None, "shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"], typer.Option(case_sensitive=False)
+    ] = None,
+    augment_size: float = 0.3,
 ):
     """
     Train model on DEAM, PMEmo, or MERGE dataset.
@@ -462,15 +473,23 @@ def main(
     else:
         raise NotImplementedError(dataset_name)
 
+    suffix = f"_{augment}" if augment is not None else ""
     report_dir = (
         REPORTS_DIR
-        / f'training_{dataset_name}_{prediction_mode}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
+        / f'training_{dataset_name}_{prediction_mode}{suffix}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
     )
     report_dir.mkdir(parents=True)
     writer = SummaryWriter(log_dir=str(report_dir / "tensorboard"))
 
     embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
     assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
+    aug_manifest = None
+    if augment:
+        aug_embeddings_dir = PROCESSED_DATA_DIR / dataset_name / f"embeddings{suffix}"
+        assert aug_embeddings_dir.is_dir(), f"Augment embeddings dir not found: {embeddings_dir}"
+        aug_manifest_path = aug_embeddings_dir / "manifest.csv"
+        assert aug_manifest_path.is_file(), f"Augment manifest file not found: {aug_manifest_path}"
+        aug_manifest = pd.read_csv(aug_manifest_path)
 
     set_seed(args.seed)
 
@@ -488,83 +507,60 @@ def main(
     # MERGE DATASET: Use predefined splits
     # ========================================================================
     if dataset_name == "MERGE":
-        train_df, val_df, test_df = dataset.load_train_val_test_splits(merge_split)
+        components = get_mode_components(prediction_mode)
+        data = prepare_datasets_merge(dataset, merge_split, components, args.batch_size, aug_manifest, augment_size, augment)
 
-        if prediction_mode == "VA":
-            train_items = build_items_merge_regression(train_df, dataset)
-            val_items = build_items_merge_regression(val_df, dataset)
-            test_items = build_items_merge_regression(test_df, dataset)
-            dset_class = SongSequenceDataset
-            collate_fn = pad_and_mask
-            model_class = BiGRUHead
-            train_fn = train_model_regression
-            eval_fn = evaluate_model_regression
-        else:  # Russell4Q
-            train_items = build_items_merge_classification(train_df, dataset)
-            val_items = build_items_merge_classification(val_df, dataset)
-            test_items = build_items_merge_classification(test_df, dataset)
-            dset_class = SongClassificationDataset
-            collate_fn = pad_and_mask_classification
-            model_class = BiGRUClassificationHead
-            train_fn = train_model_classification
-            eval_fn = evaluate_model_classification
-
-        train_dset = dset_class(train_items)
-        val_dset = dset_class(val_items)
-        test_dset = dset_class(test_items)
-
-        train_loader = DataLoader(
-            train_dset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True
-        )
-        val_loader = DataLoader(val_dset, batch_size=args.batch_size, collate_fn=collate_fn)
-        test_loader = DataLoader(test_dset, batch_size=args.batch_size, collate_fn=collate_fn)
-
+        train_s = len(data["train_loader"].dataset)
+        val_s = len(data["val_loader"].dataset)
+        test_s = len(data["test_loader"].dataset)
         logger.info(
-            f"MERGE split {merge_split}: {len(train_items)} train, {len(val_items)} val, {len(test_items)} test"
+            f"MERGE split {merge_split}: {train_s} train, {val_s} val, {test_s} test"
         )
 
-        model = model_class(
-            in_dim=train_dset.input_dim, hidden_dim=hidden_dim, dropout=dropout
+        model = components["model_class"](
+            in_dim=data["train_loader"].dataset.input_dim, hidden_dim=hidden_dim, dropout=dropout
         ).to(device)
 
+        dummy_input = torch.randn(1, 1, data["train_loader"].dataset.input_dim).to(device)
+        writer.add_graph(model, dummy_input)
+
         if prediction_mode == "VA":
-            model, score = train_fn(
+            model, score = components["train_fn"](
                 name="merge_va",
                 model=model,
                 args=args,
-                train_loader=train_loader,
-                test_loader=val_loader,
+                train_loader=data["train_loader"],
+                test_loader=data["val_loader"],
                 report_dir=report_dir,
                 writer=writer,
                 scatter=True,
             )
-            test_score = eval_fn(model, test_loader, device, writer, report_dir, scatter=True)
-            metric_name = "CCC_mean"
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, report_dir, scatter=True)
         else:
-            model, score = train_fn(
+            model, score = components["train_fn"](
                 name="merge_russell4q",
                 model=model,
                 args=args,
-                train_loader=train_loader,
-                test_loader=val_loader,
+                train_loader=data["train_loader"],
+                test_loader=data["val_loader"],
                 report_dir=report_dir,
                 writer=writer,
                 confusion=True,
             )
-            test_score = eval_fn(model, test_loader, device, writer, report_dir, confusion=True)
-            metric_name = "Accuracy"
-
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, report_dir, confusion=True)
+        
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
+        metric_name = components["metric_name"]
         save_training_summary(
             report_dir / "training_summary.json",
             model_path=model_path,
             dataset_name=dataset_name,
             prediction_mode=prediction_mode,
-            train_size=len(train_items),
-            validation_size=len(val_items),
-            test_size=len(test_items),
+            train_size=train_s,
+            validation_size=val_s,
+            test_size=test_s,
             validation_score=score[metric_name],
             test_score=test_score[metric_name],
             merge_split=merge_split,
@@ -575,28 +571,17 @@ def main(
     # DEAM/PMEmo: Use K-fold cross-validation
     # ========================================================================
     else:
-        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         assert manifest_path.is_file(), f"Manifest file not found: {manifest_path}"
         manifest = pd.read_csv(manifest_path)
-
-        n_samples = len(manifest)
-        indices = np.arange(n_samples)
-        train_indices, test_indices = train_test_split(
-            indices, test_size=test_size, random_state=seed, shuffle=True
-        )
-        kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
-
-        folds = []
-        for train_idx, val_idx in kf.split(train_indices):
-            folds.append(
-                {"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()}
-            )
+        components = get_mode_components(prediction_mode)
+        split_data = prepare_kfold(manifest, args.test_size, kfolds, seed)
 
         save_splits(
             report_dir / "splits.json",
             dataset_name=dataset_name,
             prediction_mode=prediction_mode,
-            folds=folds,
+            folds=split_data["folds"],
             head=head,
             hyperparameters=hyperparams,
             seed=seed
@@ -604,53 +589,26 @@ def main(
 
         logger.info(f"Training started. Report dir: {report_dir}")
 
-        # Build items based on prediction mode
-        if prediction_mode == "VA":
-            items = build_items_regression(
-                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
-            )
-            dset = SongSequenceDataset(items)
-            collate_fn = pad_and_mask
-            model_class = BiGRUHead
-            train_fn = train_model_regression
-        else:  # Russell4Q with automatic label generation
-            items = build_items_classification(
-                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
-            )
-            dset = SongClassificationDataset(items)
-            collate_fn = pad_and_mask_classification
-            model_class = BiGRUClassificationHead
-            train_fn = train_model_classification
-
         # K-fold validation
         fold_scores = []
-        metric_name = "CCC_mean" if prediction_mode == "VA" else "Accuracy"
 
-        for i, fold in enumerate(folds, start=1):
+        kfolds = prepare_kfold_dataset(manifest, dataset, split_data["folds"], components, batch_size, labels_scale, aug_manifest, augment_size)
+
+        for i, train_loader, valid_loader in kfolds["folds"]:
             logger.info(f"Training fold {i}...")
-
-            train_subset = Subset(dset, indices=fold["train_indices"])
-            valid_subset = Subset(dset, indices=fold["validation_indices"])
-            train_loader = DataLoader(
-                train_subset, batch_size=args.batch_size, collate_fn=collate_fn
-            )
-            valid_loader = DataLoader(
-                valid_subset, batch_size=args.batch_size, collate_fn=collate_fn
-            )
             logger.info(
-                f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
+                f"Fold {i} size: {len(train_loader.dataset)} train, {len(valid_loader.dataset)} validation"
             )
 
-            model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+            model = components["model_class"](in_dim=kfolds["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
                 device
             )
 
             if i == 1:
-                Xb, Yb = valid_subset[0]
-                Xb = torch.tensor(Xb, dtype=torch.float32).unsqueeze(0).to(device)
-                writer.add_graph(model, Xb)
+                dummy_input = torch.randn(1, 1, kfolds["dataset"].input_dim).to(device)
+                writer.add_graph(model, dummy_input)
 
-            _, score = train_fn(
+            _, score = components["train_fn"](
                 name=f"fold_{i}",
                 model=model,
                 args=args,
@@ -659,21 +617,18 @@ def main(
                 report_dir=report_dir,
                 writer=writer,
             )
-            fold_scores.append(score[metric_name])
+            fold_scores.append(score[components["metric_name"]])
 
         avg_score = np.mean(fold_scores)
         std_score = np.std(fold_scores)
-        logger.info(f"K-fold validation {metric_name}: {avg_score:.4f} ± {std_score:.4f}")
+        logger.info(f"K-fold validation {components["metric_name"]}: {avg_score:.4f} ± {std_score:.4f}")
 
         logger.info("Training final model on full training set...")
 
-        train_subset = Subset(dset, indices=train_indices)
-        test_subset = Subset(dset, indices=test_indices)
-        train_loader = DataLoader(train_subset, batch_size=args.batch_size, collate_fn=collate_fn)
-        test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=collate_fn)
-        logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
+        data = prepare_datasets(dataset, manifest, split_data["train_indices"], split_data["test_indices"], components, batch_size, labels_scale, aug_manifest, augment_size)
+        logger.info(f"Final size: {len(data["train_loader"].dataset)} train, {len(data["test_loader"].dataset)} test")
 
-        model = model_class(in_dim=dset.input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+        model = components["model_class"](in_dim=data["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
             device
         )
 
@@ -682,8 +637,8 @@ def main(
             "name": "final",
             "model": model,
             "args": args,
-            "train_loader": train_loader,
-            "test_loader": test_loader,
+            "train_loader": data["train_loader"],
+            "test_loader": data["test_loader"],
             "report_dir": report_dir,
             "writer": writer,
         }
@@ -694,7 +649,7 @@ def main(
         else:  # Russell4Q
             train_kwargs["confusion"] = True
 
-        model, score = train_fn(**train_kwargs)
+        model, score = components["train_fn"](**train_kwargs)
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
@@ -710,9 +665,9 @@ def main(
             model_path=model_path,
             dataset_name=dataset_name,
             prediction_mode=prediction_mode,
-            train_size=len(train_subset),
-            test_size=len(test_subset),
-            test_score=score[metric_name],
+            train_size=len(data["train_loader"].dataset),
+            test_size=len(data["test_loader"].dataset),
+            test_score=score[components["metric_name"]],
             kfold_mean=avg_score,
             kfold_std=std_score,
             hyperparameters=hyperparams
