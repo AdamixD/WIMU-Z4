@@ -1,0 +1,255 @@
+from datetime import datetime
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Annotated, Literal, Optional
+from random import randint
+
+from loguru import logger
+import numpy as np
+import optuna
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import torch
+from torch.utils.data import DataLoader, Subset
+from torch.utils.tensorboard import SummaryWriter
+import typer
+
+from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
+from mer.datasets.common import SongSequenceDataset
+from mer.datasets.deam import DEAMDataset
+from mer.datasets.pmemo import PMEmoDataset
+from mer.datasets.merge import MERGEDataset
+from mer.heads import BiGRUHead
+from mer.modeling.train import build_items_regression, train_model_regression, train_model_classification
+from mer.modeling.utils.misc import pad_and_mask, set_seed
+from mer.modeling.utils.train_utils import (
+    prepare_kfold,
+    prepare_kfold_dataset,
+    prepare_datasets,
+    prepare_datasets_merge,
+    get_mode_components
+)
+from mer.modeling.utils.report import save_splits
+
+
+app = typer.Typer()
+
+
+def make_objective(dataset_comp, base_args, study_dir: Path):
+
+    if dataset_comp["dataset_name"] != "MERGE":
+        manifest_path = PROCESSED_DATA_DIR / dataset_comp["dataset_name"] / "embeddings" / "manifest.csv"
+        assert manifest_path.is_file(), f"Manifest file not found: {manifest_path}"
+        manifest = pd.read_csv(manifest_path)
+        split_data = prepare_kfold(manifest, base_args.test_size, base_args.kfolds, base_args.seed)
+        save_splits(
+            study_dir / "splits.json",
+            dataset_name=dataset_comp["dataset_name"],
+            prediction_mode=dataset_comp["prediction_mode"],
+            folds=split_data["folds"],
+            head=base_args.head,
+            hyperparameters=None,
+            seed=base_args.seed
+        )
+
+    def objective(trial: optuna.trial.Trial):
+
+        # Build search space depending on whether user provided param or not
+        hparams = {}
+
+        if base_args.lr is None:
+            hparams["lr"] = trial.suggest_float("lr", 1e-5, 1e-4, log=True)
+
+        if base_args.hidden_dim is None:
+            hparams["hidden_dim"] = trial.suggest_int("hidden_dim", 64, 128, step=64)
+
+        if base_args.dropout is None:
+            hparams["dropout"] = trial.suggest_float("dropout", 0.1, 0.4)
+
+        if base_args.batch_size is None:
+            hparams["batch_size"] = trial.suggest_categorical("batch_size", [4, 6])
+
+        merged = vars(base_args).copy()
+        merged.update(hparams)
+        args = SimpleNamespace(**merged)
+
+        trial_dir = study_dir / f"trial_{trial.number}"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+
+        writer = SummaryWriter(log_dir=str(trial_dir / "tensorboard"))
+
+        if dataset_comp["dataset_name"] == "MERGE":
+            components = get_mode_components(dataset_comp["prediction_mode"])
+            data = prepare_datasets_merge(dataset_comp["dataset"], dataset_comp["merge_split"], components, args.batch_size)
+            model = components["model_class"](
+                in_dim=data["train_loader"].dataset.input_dim, hidden_dim=args.hidden_dim, dropout=args.dropout
+            ).to(args.device)
+            model, score = components["train_fn"](
+                name=f"trial_{trial.number}",
+                model=model,
+                args=args,
+                train_loader=data["train_loader"],
+                test_loader=data["val_loader"],
+                report_dir=trial_dir,
+                writer=writer,
+            )
+            val_score = score[components["metric_name"]]
+        else:
+            components = get_mode_components(dataset_comp["prediction_mode"])
+            fold_scores = []
+            kfolds = prepare_kfold_dataset(manifest, dataset_comp["dataset"], split_data["folds"], components, args.batch_size, args.labels_scale)
+            for i, train_loader, valid_loader in kfolds["folds"]:
+                model = components["model_class"](
+                    in_dim=kfolds["dataset"].input_dim, 
+                    hidden_dim=args.hidden_dim, 
+                    dropout=args.dropout).to(args.device)
+                _, score = components["train_fn"](
+                    name=f"trial_{trial.number}_fold{i}",
+                    model=model,
+                    args=args,
+                    train_loader=train_loader,
+                    test_loader=valid_loader,
+                    report_dir=trial_dir,
+                    writer=writer,
+                )
+                fold_scores.append(score[components["metric_name"]])
+
+                trial.report(np.mean(fold_scores), step=i)
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+            val_score = np.mean(fold_scores)
+
+        writer.add_hparams(
+            hparam_dict=hparams,
+            metric_dict={"ccc_mean": float(val_score)},
+        )
+        writer.close()
+
+        return val_score
+
+    return objective
+
+
+@app.command()
+def run(
+    dataset_name: Annotated[
+        Literal["DEAM", "PMEmo", "MERGE"], typer.Option(case_sensitive=False)
+    ] = "DEAM",
+    prediction_mode: Annotated[
+        Literal["VA", "Russell4Q"],
+        typer.Option(case_sensitive=False, help="VA for regression, Russell4Q for classification"),
+    ] = "VA",
+    head: Annotated[Literal["BiGRU"], typer.Option(case_sensitive=False)] = "BiGRU",
+    n_trials: int = 3,
+    seed: int = randint(1, 1000000),
+    test_size: float = 0.2,
+    epochs: int = 5,
+    patience: int = 15,
+    kfolds: int = 5,
+    device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
+    labels_scale: Annotated[
+        Literal["19", "norm"],
+        typer.Option(case_sensitive=False, help="Scale of dynamic labels in DEAM source files"),
+    ] = "norm",
+    merge_split: Annotated[
+        Literal["70_15_15", "40_30_30"],
+        typer.Option(case_sensitive=False, help="MERGE dataset split ratio"),
+    ] = "70_15_15",
+    loss_type: Annotated[
+        Literal["ccc", "mse", "hybrid"], typer.Option(case_sensitive=False)
+    ] = "ccc",
+
+    lr: Optional[float] = None,
+    hidden_dim: Optional[int] = None,
+    dropout: Optional[float] = None,
+    batch_size: Optional[int] = None,
+):
+
+    set_seed(seed)
+
+    # Validate prediction mode
+    if prediction_mode not in ["VA", "Russell4Q"]:
+        raise ValueError("prediction_mode must be 'VA' or 'Russell4Q'")
+
+    if dataset_name == "DEAM":
+        dataset = DEAMDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+        )
+    elif dataset_name == "PMEmo":
+        dataset = PMEmoDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+        )
+    elif dataset_name == "MERGE":
+        dataset = MERGEDataset(
+            root_dir=RAW_DATA_DIR / dataset_name,
+            out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
+            mode=prediction_mode,
+        )
+    else:
+        raise NotImplementedError(dataset_name)
+
+    study_dir = REPORTS_DIR / f"optimize_{dataset_name}_{prediction_mode}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    study_dir.mkdir(parents=True)
+    logger.info(f"Study directory: {study_dir}")
+
+    base_args = SimpleNamespace(
+        epochs=epochs,
+        patience=patience,
+        device=device,
+        head=head,
+        labels_scale=labels_scale,
+        seed=seed,
+        kfolds=kfolds,
+        test_size=test_size,
+        loss_type=loss_type,
+
+        lr=lr,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
+        batch_size=batch_size,
+    )
+
+    dataset_comp = {
+            "dataset": dataset,
+            "dataset_name": dataset_name,
+            "prediction_mode": prediction_mode,
+            }
+
+    if dataset_name == "MERGE":
+        dataset_comp["merge_split"] = merge_split
+
+    sampler = optuna.samplers.TPESampler(seed=seed)
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=sampler,
+        pruner=pruner,
+    )
+
+    objective = make_objective(
+        dataset_comp=dataset_comp,
+        base_args=base_args,
+        study_dir=study_dir,
+    )
+
+    study.optimize(objective, n_trials=n_trials)
+
+    best = study.best_trial
+    # TODO add dataset name and prediction mode and make function out of it to file report
+    result_summary = {
+        "best_value": best.value,
+        "best_params": best.params,
+        "n_trials": n_trials,
+    }
+    (study_dir / "best_hparams.json").write_text(json.dumps(result_summary, indent=2))
+
+    logger.success(f"Best CCC_mean = {best.value:.4f}")
+    logger.success(f"Best params = {best.params}")
+
+
+if __name__ == "__main__":
+    app()
