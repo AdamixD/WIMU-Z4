@@ -367,7 +367,7 @@ def main(
             root_dir=RAW_DATA_DIR / dataset_name,
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
-        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         manifest = pd.read_csv(manifest_path)
 
         # Replicate train/test split from training
@@ -416,7 +416,7 @@ def main(
             root_dir=RAW_DATA_DIR / dataset_name,
             out_embeddings_dir=PROCESSED_DATA_DIR / dataset_name / "embeddings",
         )
-        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         manifest = pd.read_csv(manifest_path)
 
         # Replicate train/test split from training

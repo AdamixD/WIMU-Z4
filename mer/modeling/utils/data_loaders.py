@@ -76,7 +76,7 @@ def build_items_classification(manifest, dataset, labels_scale: str = "19"):
     return items
 
 
-def build_items_merge_regression(manifest, dataset):
+def build_items_merge_regression(manifest, dataset, augment_name=None):
     """Build items for MERGE VA regression mode."""
     vmap, amap = dataset.va_maps
     items = []
@@ -94,6 +94,8 @@ def build_items_merge_regression(manifest, dataset):
 
         v, a = vmap[song_id], amap[song_id]
         embeddings_path = dataset.embeddings_dir / f"{song_id}.npy"
+        if augment_name:
+            embeddings_path = dataset.embeddings_dir.parent / f"{dataset.embeddings_dir.name}_{augment_name}" / f"{song_id}_{augment_name}.npy"
 
         if not embeddings_path.exists():
             continue
@@ -109,7 +111,7 @@ def build_items_merge_regression(manifest, dataset):
     return items
 
 
-def build_items_merge_classification(manifest, dataset):
+def build_items_merge_classification(manifest, dataset, augment_name=None):
     """Build items for MERGE Russell4Q classification mode."""
     qmap = dataset.quadrant_map
     items = []
@@ -127,6 +129,8 @@ def build_items_merge_classification(manifest, dataset):
 
         q_class = qmap[song_id]
         embeddings_path = dataset.embeddings_dir / f"{song_id}.npy"
+        if augment_name:
+            embeddings_path = dataset.embeddings_dir.parent / f"{dataset.embeddings_dir.name}_{augment_name}" / f"{song_id}_{augment_name}.npy"
 
         if not embeddings_path.exists():
             continue

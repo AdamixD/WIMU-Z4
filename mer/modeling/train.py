@@ -5,49 +5,41 @@ Unified training script for all datasets (DEAM, PMEmo, MERGE) with support for:
 """
 
 from datetime import datetime
-import json
 from pathlib import Path
 from random import randint
 from types import SimpleNamespace
-from typing import Annotated, Literal
+from typing import Annotated, Literal, List
 
 from loguru import logger
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import KFold, train_test_split
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import typer
 
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
-from mer.datasets.common import SongClassificationDataset, SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset
-from mer.heads import (
-    BiGRUClassificationHead,
-    BiGRUHead,
-    CNNLSTMClassificationHead,
-    CNNLSTMHead,
-)
-from mer.modeling.utils.data_loaders import (
-    build_items_classification,
-    build_items_merge_classification,
-    build_items_merge_regression,
-    build_items_regression,
-)
 from mer.modeling.utils.loss import make_loss_fn
 from mer.modeling.utils.metrics import (
     classification_metrics,
-    labels_convert,
     metrics_dict,
 )
-from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
+from mer.modeling.utils.misc import set_seed
+from mer.modeling.utils.report import save_splits, save_training_summary
+from mer.modeling.utils.train_utils import (
+    prepare_kfold,
+    prepare_kfold_dataset,
+    prepare_datasets,
+    prepare_datasets_merge,
+    get_mode_components
+)
 
 app = typer.Typer()
 
@@ -387,24 +379,6 @@ def train_model_classification(
     return model, best_m
 
 
-def _get_head_class(prediction_mode: str, head_name: str) -> type[nn.Module]:
-    """Return the concrete head class requested via CLI."""
-    registry = {
-        "VA": {
-            "BiGRU": BiGRUHead,
-            "CNNLSTM": CNNLSTMHead,
-        },
-        "Russell4Q": {
-            "BiGRU": BiGRUClassificationHead,
-            "CNNLSTM": CNNLSTMClassificationHead,
-        },
-    }
-    try:
-        return registry[prediction_mode][head_name]
-    except KeyError as err:
-        raise ValueError(f"Head '{head_name}' is not available for mode '{prediction_mode}'") from err
-
-
 # ============================================================================
 # MAIN TRAINING COMMAND
 # ============================================================================
@@ -443,6 +417,9 @@ def main(
         typer.Option(case_sensitive=False, help="MERGE dataset split ratio"),
     ] = "70_15_15",
     device: Annotated[Literal["cuda", "cpu"], typer.Option(case_sensitive=False)] = DEFAULT_DEVICE,
+    augments: Annotated[
+    List[str], typer.Option(case_sensitive=False)] = [],
+    augment_size: float = 0.3,
 ):
     """
     Train model on DEAM, PMEmo, or MERGE dataset.
@@ -459,6 +436,13 @@ def main(
     # Validate prediction mode
     if prediction_mode not in ["VA", "Russell4Q"]:
         raise ValueError("prediction_mode must be 'VA' or 'Russell4Q'")
+
+    # Validate augments names
+    ALLOWED_AUGMENTS = ["shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"]
+    for a in augments:
+        if a not in ALLOWED_AUGMENTS:
+            raise ValueError(f"Invalid augmentation name: {a}. Must be {ALLOWED_AUGMENTS}")
+
 
     # Info about automatic label generation for Russell4Q
     if dataset_name in ["DEAM", "PMEmo"] and prediction_mode == "Russell4Q":
@@ -486,212 +470,146 @@ def main(
     else:
         raise NotImplementedError(dataset_name)
 
+    embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
+    assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
+    aug_manifests = []
+    if augments:
+        for augment in augments:
+            aug_embeddings_dir = PROCESSED_DATA_DIR / dataset_name / f"embeddings_{augment}"
+            assert aug_embeddings_dir.is_dir(), f"Augment embeddings dir not found: {aug_embeddings_dir}"
+            aug_manifest_path = aug_embeddings_dir / "manifest.csv"
+            assert aug_manifest_path.is_file(), f"Augment manifest file not found: {aug_manifest_path}"
+            aug_manifest = pd.read_csv(aug_manifest_path)
+            aug_manifests.append((aug_manifest, augment))
+
+    suffix = "_" + "_".join(augments) if augments else ""
+
     report_dir = (
         REPORTS_DIR
-        / f'training_{dataset_name}_{prediction_mode}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
+        / f'training_{dataset_name}_{prediction_mode}{suffix}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
     )
     report_dir.mkdir(parents=True)
     writer = SummaryWriter(log_dir=str(report_dir / "tensorboard"))
 
-    embeddings_dir = PROCESSED_DATA_DIR / dataset_name / "embeddings"
-    assert embeddings_dir.is_dir(), f"Embeddings dir not found: {embeddings_dir}"
-
     set_seed(args.seed)
+
+    hyperparams = {
+        "epochs": epochs,
+        "patience": patience,
+        "hidden_dim": hidden_dim,
+        "dropout": dropout,
+        "lr": lr,
+        "batch_size": batch_size,
+        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
+    }
 
     # ========================================================================
     # MERGE DATASET: Use predefined splits
     # ========================================================================
     if dataset_name == "MERGE":
-        train_df, val_df, test_df = dataset.load_train_val_test_splits(merge_split)
+        components = get_mode_components(prediction_mode, head)
+        data = prepare_datasets_merge(dataset, merge_split, components, args.batch_size, aug_manifests, augment_size)
 
-        if prediction_mode == "VA":
-            train_items = build_items_merge_regression(train_df, dataset)
-            val_items = build_items_merge_regression(val_df, dataset)
-            test_items = build_items_merge_regression(test_df, dataset)
-            dset_class = SongSequenceDataset
-            collate_fn = pad_and_mask
-            train_fn = train_model_regression
-            eval_fn = evaluate_model_regression
-        else:  # Russell4Q
-            train_items = build_items_merge_classification(train_df, dataset)
-            val_items = build_items_merge_classification(val_df, dataset)
-            test_items = build_items_merge_classification(test_df, dataset)
-            dset_class = SongClassificationDataset
-            collate_fn = pad_and_mask_classification
-            train_fn = train_model_classification
-            eval_fn = evaluate_model_classification
-
-        model_class = _get_head_class(prediction_mode, head)
-
-        train_dset = dset_class(train_items)
-        val_dset = dset_class(val_items)
-        test_dset = dset_class(test_items)
-
-        train_loader = DataLoader(
-            train_dset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True
-        )
-        val_loader = DataLoader(val_dset, batch_size=args.batch_size, collate_fn=collate_fn)
-        test_loader = DataLoader(test_dset, batch_size=args.batch_size, collate_fn=collate_fn)
-
+        train_s = len(data["train_loader"].dataset)
+        val_s = len(data["val_loader"].dataset)
+        test_s = len(data["test_loader"].dataset)
         logger.info(
-            f"MERGE split {merge_split}: {len(train_items)} train, {len(val_items)} val, {len(test_items)} test"
+            f"MERGE split {merge_split}: {train_s} train, {val_s} val, {test_s} test"
         )
 
-        model = model_class(
-            in_dim=train_dset.input_dim,
-            hidden_dim=hidden_dim,
-            dropout=dropout,
+        model = components["model_class"](
+            in_dim=data["train_loader"].dataset.input_dim, hidden_dim=hidden_dim, dropout=dropout
         ).to(device)
 
+        dummy_input = torch.randn(1, 1, data["train_loader"].dataset.input_dim).to(device)
+        writer.add_graph(model, dummy_input)
+
         if prediction_mode == "VA":
-            model, score = train_fn(
+            model, score = components["train_fn"](
                 name="merge_va",
                 model=model,
                 args=args,
-                train_loader=train_loader,
-                test_loader=val_loader,
+                train_loader=data["train_loader"],
+                test_loader=data["val_loader"],
                 report_dir=report_dir,
                 writer=writer,
                 scatter=True,
             )
-            test_score = eval_fn(model, test_loader, device, writer, report_dir, scatter=True)
-            metric_name = "CCC_mean"
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, report_dir, scatter=True)
         else:
-            model, score = train_fn(
+            model, score = components["train_fn"](
                 name="merge_russell4q",
                 model=model,
                 args=args,
-                train_loader=train_loader,
-                test_loader=val_loader,
+                train_loader=data["train_loader"],
+                test_loader=data["val_loader"],
                 report_dir=report_dir,
                 writer=writer,
                 confusion=True,
             )
-            test_score = eval_fn(model, test_loader, device, writer, report_dir, confusion=True)
-            metric_name = "Accuracy"
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, report_dir, confusion=True)
 
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
-        (report_dir / "training_summary.json").write_text(
-            json.dumps(
-                {
-                    "model_path": str(model_path),
-                    "dataset": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "merge_split": merge_split,
-                    "training_size": len(train_items),
-                    "validation_size": len(val_items),
-                    "test_size": len(test_items),
-                    "validation_score": score[metric_name],
-                    "test_score": test_score[metric_name],
-                    "hyperparameters": {
-                        "hidden_dim": hidden_dim,
-                        "dropout": dropout,
-                        "lr": lr,
-                        "batch_size": batch_size,
-                        "epochs": epochs,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                    },
-                },
-                indent=2,
-            )
+        metric_name = components["metric_name"]
+        # TODO add augmentations to summary
+        save_training_summary(
+            report_dir / "training_summary.json",
+            model_path=model_path,
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=train_s,
+            validation_size=val_s,
+            test_size=test_s,
+            validation_score=score[metric_name],
+            test_score=test_score[metric_name],
+            merge_split=merge_split,
+            hyperparameters=hyperparams
         )
 
     # ========================================================================
     # DEAM/PMEmo: Use K-fold cross-validation
     # ========================================================================
     else:
-        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         assert manifest_path.is_file(), f"Manifest file not found: {manifest_path}"
         manifest = pd.read_csv(manifest_path)
+        components = get_mode_components(prediction_mode, head)
+        split_data = prepare_kfold(manifest, args.test_size, kfolds, seed)
 
-        n_samples = len(manifest)
-        indices = np.arange(n_samples)
-        train_indices, test_indices = train_test_split(
-            indices, test_size=test_size, random_state=seed, shuffle=True
-        )
-        kf = KFold(n_splits=kfolds, shuffle=True, random_state=seed)
-
-        folds = []
-        for train_idx, val_idx in kf.split(train_indices):
-            folds.append(
-                {"train_indices": train_idx.tolist(), "validation_indices": val_idx.tolist()}
-            )
-
-        (report_dir / "splits.json").write_text(
-            json.dumps(
-                {
-                    "dataset_name": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "seed": seed,
-                    "folds": folds,
-                    "head": head,
-                    "train_params": {
-                        "epochs": epochs,
-                        "batch_size": batch_size,
-                        "lr": lr,
-                        "patience": patience,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                        "hidden": hidden_dim,
-                        "dropout": dropout,
-                    },
-                },
-                indent=2,
-            )
+        save_splits(
+            report_dir / "splits.json",
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            folds=split_data["folds"],
+            head=head,
+            hyperparameters=hyperparams,
+            seed=seed
         )
 
         logger.info(f"Training started. Report dir: {report_dir}")
 
-        # Build items based on prediction mode
-        if prediction_mode == "VA":
-            items = build_items_regression(
-                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
-            )
-            dset = SongSequenceDataset(items)
-            collate_fn = pad_and_mask
-            train_fn = train_model_regression
-        else:  # Russell4Q with automatic label generation
-            items = build_items_classification(
-                manifest=manifest, dataset=dataset, labels_scale=args.labels_scale
-            )
-            dset = SongClassificationDataset(items)
-            collate_fn = pad_and_mask_classification
-            train_fn = train_model_classification
-
-        model_class = _get_head_class(prediction_mode, head)
-
         # K-fold validation
         fold_scores = []
-        metric_name = "CCC_mean" if prediction_mode == "VA" else "Accuracy"
 
-        for i, fold in enumerate(folds, start=1):
+        kfolds = prepare_kfold_dataset(manifest, dataset, split_data["folds"], components, batch_size, labels_scale, aug_manifests, augment_size)
+
+        for i, train_loader, valid_loader in kfolds["folds"]:
             logger.info(f"Training fold {i}...")
-
-            train_subset = Subset(dset, indices=fold["train_indices"])
-            valid_subset = Subset(dset, indices=fold["validation_indices"])
-            train_loader = DataLoader(
-                train_subset, batch_size=args.batch_size, collate_fn=collate_fn
-            )
-            valid_loader = DataLoader(
-                valid_subset, batch_size=args.batch_size, collate_fn=collate_fn
-            )
             logger.info(
-                f"Fold {i} size: {len(train_subset)} train, {len(valid_subset)} validation"
+                f"Fold {i} size: {len(train_loader.dataset)} train, {len(valid_loader.dataset)} validation"
             )
 
-            model = model_class(
-                in_dim=dset.input_dim,
-                hidden_dim=hidden_dim,
-                dropout=dropout,
-            ).to(device)
+            model = components["model_class"](in_dim=kfolds["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+                device
+            )
 
             if i == 1:
-                Xb, Yb = valid_subset[0]
-                Xb = torch.tensor(Xb, dtype=torch.float32).unsqueeze(0).to(device)
-                writer.add_graph(model, Xb)
+                dummy_input = torch.randn(1, 1, kfolds["dataset"].input_dim).to(device)
+                writer.add_graph(model, dummy_input)
 
-            _, score = train_fn(
+            _, score = components["train_fn"](
                 name=f"fold_{i}",
                 model=model,
                 args=args,
@@ -700,33 +618,28 @@ def main(
                 report_dir=report_dir,
                 writer=writer,
             )
-            fold_scores.append(score[metric_name])
+            fold_scores.append(score[components["metric_name"]])
 
         avg_score = np.mean(fold_scores)
         std_score = np.std(fold_scores)
-        logger.info(f"K-fold validation {metric_name}: {avg_score:.4f} ± {std_score:.4f}")
+        logger.info(f"K-fold validation {components["metric_name"]}: {avg_score:.4f} ± {std_score:.4f}")
 
         logger.info("Training final model on full training set...")
 
-        train_subset = Subset(dset, indices=train_indices)
-        test_subset = Subset(dset, indices=test_indices)
-        train_loader = DataLoader(train_subset, batch_size=args.batch_size, collate_fn=collate_fn)
-        test_loader = DataLoader(test_subset, batch_size=args.batch_size, collate_fn=collate_fn)
-        logger.info(f"Final size: {len(train_subset)} train, {len(test_subset)} test")
+        data = prepare_datasets(dataset, manifest, split_data["train_indices"], split_data["test_indices"], components, batch_size, labels_scale, aug_manifests, augment_size)
+        logger.info(f"Final size: {len(data["train_loader"].dataset)} train, {len(data["test_loader"].dataset)} test")
 
-        model = model_class(
-            in_dim=dset.input_dim,
-            hidden_dim=hidden_dim,
-            dropout=dropout,
-        ).to(device)
+        model = components["model_class"](in_dim=data["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
+            device
+        )
 
         # Prepare kwargs based on prediction mode
         train_kwargs = {
             "name": "final",
             "model": model,
             "args": args,
-            "train_loader": train_loader,
-            "test_loader": test_loader,
+            "train_loader": data["train_loader"],
+            "test_loader": data["test_loader"],
             "report_dir": report_dir,
             "writer": writer,
         }
@@ -737,7 +650,7 @@ def main(
         else:  # Russell4Q
             train_kwargs["confusion"] = True
 
-        model, score = train_fn(**train_kwargs)
+        model, score = components["train_fn"](**train_kwargs)
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
@@ -748,28 +661,18 @@ def main(
 
         writer.add_text("Test results", table)
 
-        (report_dir / "training_summary.json").write_text(
-            json.dumps(
-                {
-                    "model_path": str(model_path),
-                    "dataset": dataset_name,
-                    "prediction_mode": prediction_mode,
-                    "training_size": len(train_subset),
-                    "test_size": len(test_subset),
-                    "test_score": score[metric_name],
-                    "kfold_validation_score_mean": avg_score,
-                    "kfold_validation_score_std": std_score,
-                    "hyperparameters": {
-                        "hidden_dim": hidden_dim,
-                        "dropout": dropout,
-                        "lr": lr,
-                        "batch_size": batch_size,
-                        "epochs": epochs,
-                        "loss_type": loss_type if prediction_mode == "VA" else "cross_entropy",
-                    },
-                },
-                indent=2,
-            )
+        # TODO add augmentations to summary
+        save_training_summary(
+            report_dir / "training_summary.json",
+            model_path=model_path,
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=len(data["train_loader"].dataset),
+            test_size=len(data["test_loader"].dataset),
+            test_score=score[components["metric_name"]],
+            kfold_mean=avg_score,
+            kfold_std=std_score,
+            hyperparameters=hyperparams
         )
 
     writer.close()

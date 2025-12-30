@@ -162,7 +162,7 @@ def main(
 
     else:
         # Use K-fold approach for DEAM/PMEmo
-        manifest_path = PROCESSED_DATA_DIR / dataset_name / "manifest.csv"
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         manifest = pd.read_csv(manifest_path)
 
         from sklearn.model_selection import train_test_split
