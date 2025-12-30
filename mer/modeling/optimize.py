@@ -9,24 +9,17 @@ from loguru import logger
 import numpy as np
 import optuna
 import pandas as pd
-from sklearn.model_selection import train_test_split
-import torch
-from torch.utils.data import DataLoader, Subset
 from torch.utils.tensorboard import SummaryWriter
 import typer
 
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
-from mer.datasets.common import SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.pmemo import PMEmoDataset
 from mer.datasets.merge import MERGEDataset
-from mer.heads import BiGRUHead
-from mer.modeling.train import build_items_regression, train_model_regression, train_model_classification
-from mer.modeling.utils.misc import pad_and_mask, set_seed
+from mer.modeling.utils.misc import set_seed
 from mer.modeling.utils.train_utils import (
     prepare_kfold,
     prepare_kfold_dataset,
-    prepare_datasets,
     prepare_datasets_merge,
     get_mode_components
 )
@@ -36,7 +29,7 @@ from mer.modeling.utils.report import save_splits
 app = typer.Typer()
 
 
-def make_objective(dataset_comp, base_args, study_dir: Path):
+def make_objective(dataset_comp, base_args, study_dir: Path, head_name):
 
     if dataset_comp["dataset_name"] != "MERGE":
         manifest_path = PROCESSED_DATA_DIR / dataset_comp["dataset_name"] / "embeddings" / "manifest.csv"
@@ -80,7 +73,7 @@ def make_objective(dataset_comp, base_args, study_dir: Path):
         writer = SummaryWriter(log_dir=str(trial_dir / "tensorboard"))
 
         if dataset_comp["dataset_name"] == "MERGE":
-            components = get_mode_components(dataset_comp["prediction_mode"])
+            components = get_mode_components(dataset_comp["prediction_mode"], head_name)
             data = prepare_datasets_merge(dataset_comp["dataset"], dataset_comp["merge_split"], components, args.batch_size)
             model = components["model_class"](
                 in_dim=data["train_loader"].dataset.input_dim, hidden_dim=args.hidden_dim, dropout=args.dropout
@@ -96,7 +89,7 @@ def make_objective(dataset_comp, base_args, study_dir: Path):
             )
             val_score = score[components["metric_name"]]
         else:
-            components = get_mode_components(dataset_comp["prediction_mode"])
+            components = get_mode_components(dataset_comp["prediction_mode"], head_name)
             fold_scores = []
             kfolds = prepare_kfold_dataset(manifest, dataset_comp["dataset"], split_data["folds"], components, args.batch_size, args.labels_scale)
             for i, train_loader, valid_loader in kfolds["folds"]:
@@ -140,7 +133,9 @@ def run(
         Literal["VA", "Russell4Q"],
         typer.Option(case_sensitive=False, help="VA for regression, Russell4Q for classification"),
     ] = "VA",
-    head: Annotated[Literal["BiGRU"], typer.Option(case_sensitive=False)] = "BiGRU",
+    head: Annotated[
+        Literal["BiGRU", "CNNLSTM"], typer.Option(case_sensitive=False)
+    ] = "BiGRU",
     n_trials: int = 3,
     seed: int = randint(1, 1000000),
     test_size: float = 0.2,
@@ -234,6 +229,7 @@ def run(
         dataset_comp=dataset_comp,
         base_args=base_args,
         study_dir=study_dir,
+        head_name=head
     )
 
     study.optimize(objective, n_trials=n_trials)

@@ -1,6 +1,7 @@
 import numpy as np
 import random
 from sklearn.model_selection import train_test_split, KFold
+from torch import nn
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
 from mer.datasets.common import (
@@ -14,7 +15,8 @@ from mer.modeling.utils.data_loaders import (
     build_items_classification
 )
 
-from mer.heads import BiGRUHead, BiGRUClassificationHead
+from mer.heads import BiGRUHead, BiGRUClassificationHead, CNNLSTMHead, \
+    CNNLSTMClassificationHead
 from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification
 
 def prepare_kfold(manifest, test_size=0.2, kfolds=5, seed=42):
@@ -38,7 +40,26 @@ def prepare_kfold(manifest, test_size=0.2, kfolds=5, seed=42):
         "test_indices": test_indices.tolist()
     }
 
-def get_mode_components(prediction_mode):
+
+def _get_head_class(prediction_mode: str, head_name: str) -> type[nn.Module]:
+    """Return the concrete head class requested via CLI."""
+    heads = {
+        "VA": {
+            "BiGRU": BiGRUHead,
+            "CNNLSTM": CNNLSTMHead,
+        },
+        "Russell4Q": {
+            "BiGRU": BiGRUClassificationHead,
+            "CNNLSTM": CNNLSTMClassificationHead,
+        },
+    }
+    try:
+        return heads[prediction_mode][head_name]
+    except KeyError as err:
+        raise ValueError(f"Head '{head_name}' is not available for mode '{prediction_mode}'") from err
+
+
+def get_mode_components(prediction_mode, head_name):
     from mer.modeling.train import (
         train_model_regression,
         train_model_classification,
@@ -47,6 +68,8 @@ def get_mode_components(prediction_mode):
         evaluate_model_regression,
         evaluate_model_classification,
     )
+
+    model_class = _get_head_class(prediction_mode, head_name)
     
     if prediction_mode == "VA":
         return {
@@ -55,7 +78,7 @@ def get_mode_components(prediction_mode):
             "build_items_manifest": build_items_regression,     # for K-Fold
             "dataset_class": SongSequenceDataset,
             "collate_fn": pad_and_mask,
-            "model_class": BiGRUHead,
+            "model_class": model_class,
             "train_fn": train_model_regression,
             "eval_fn": evaluate_model_regression,
             "metric_name": "CCC_mean",
@@ -68,7 +91,7 @@ def get_mode_components(prediction_mode):
             "build_items_manifest": build_items_classification,     # for K-Fold
             "dataset_class": SongClassificationDataset,
             "collate_fn": pad_and_mask_classification,
-            "model_class": BiGRUClassificationHead,
+            "model_class": model_class,
             "train_fn": train_model_classification,
             "eval_fn": evaluate_model_classification,
             "metric_name": "Accuracy",

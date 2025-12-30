@@ -5,7 +5,6 @@ Unified training script for all datasets (DEAM, PMEmo, MERGE) with support for:
 """
 
 from datetime import datetime
-import json
 from pathlib import Path
 from random import randint
 from types import SimpleNamespace
@@ -16,33 +15,23 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import KFold, train_test_split
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import typer
 
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
-from mer.datasets.common import SongClassificationDataset, SongSequenceDataset
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset
-from mer.heads import BiGRUClassificationHead, BiGRUHead
-from mer.modeling.utils.data_loaders import (
-    build_items_classification,
-    build_items_merge_classification,
-    build_items_merge_regression,
-    build_items_regression,
-)
 from mer.modeling.utils.loss import make_loss_fn
 from mer.modeling.utils.metrics import (
     classification_metrics,
-    labels_convert,
     metrics_dict,
 )
-from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
+from mer.modeling.utils.misc import set_seed
 from mer.modeling.utils.report import save_splits, save_training_summary
 from mer.modeling.utils.train_utils import (
     prepare_kfold,
@@ -404,7 +393,9 @@ def main(
         Literal["VA", "Russell4Q"],
         typer.Option(case_sensitive=False, help="VA for regression, Russell4Q for classification"),
     ] = "VA",
-    head: Annotated[Literal["BiGRU"], typer.Option(case_sensitive=False)] = "BiGRU",
+    head: Annotated[
+        Literal["BiGRU", "CNNLSTM"], typer.Option(case_sensitive=False)
+    ] = "BiGRU",
     epochs: int = 100,
     lr: float = 1e-3,
     batch_size: int = 6,
@@ -445,7 +436,7 @@ def main(
     # Validate prediction mode
     if prediction_mode not in ["VA", "Russell4Q"]:
         raise ValueError("prediction_mode must be 'VA' or 'Russell4Q'")
-    
+
     # Validate augments names
     ALLOWED_AUGMENTS = ["shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"]
     for a in augments:
@@ -492,7 +483,7 @@ def main(
             aug_manifests.append((aug_manifest, augment))
 
     suffix = "_" + "_".join(augments) if augments else ""
-    
+
     report_dir = (
         REPORTS_DIR
         / f'training_{dataset_name}_{prediction_mode}{suffix}_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
@@ -516,7 +507,7 @@ def main(
     # MERGE DATASET: Use predefined splits
     # ========================================================================
     if dataset_name == "MERGE":
-        components = get_mode_components(prediction_mode)
+        components = get_mode_components(prediction_mode, head)
         data = prepare_datasets_merge(dataset, merge_split, components, args.batch_size, aug_manifests, augment_size)
 
         train_s = len(data["train_loader"].dataset)
@@ -557,7 +548,7 @@ def main(
                 confusion=True,
             )
             test_score = components["eval_fn"](model, data["test_loader"], device, writer, report_dir, confusion=True)
-        
+
         model_path = report_dir / "model.pth"
         torch.save(model, model_path)
 
@@ -584,7 +575,7 @@ def main(
         manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
         assert manifest_path.is_file(), f"Manifest file not found: {manifest_path}"
         manifest = pd.read_csv(manifest_path)
-        components = get_mode_components(prediction_mode)
+        components = get_mode_components(prediction_mode, head)
         split_data = prepare_kfold(manifest, args.test_size, kfolds, seed)
 
         save_splits(
