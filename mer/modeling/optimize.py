@@ -16,7 +16,6 @@ from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.pmemo import PMEmoDataset
 from mer.datasets.merge import MERGEDataset
-from mer.modeling.train import build_items_regression
 from mer.modeling.utils.misc import set_seed
 from mer.modeling.utils.train_utils import (
     prepare_kfold,

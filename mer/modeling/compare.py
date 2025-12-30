@@ -16,8 +16,6 @@ from mer.datasets import DEAMDataset, MERGEDataset, PMEmoDataset
 from mer.datasets.common import SongClassificationDataset, SongSequenceDataset
 from mer.modeling.utils.data_loaders import (
     build_items_classification,
-    build_items_merge_classification,
-    build_items_merge_regression,
     build_items_regression,
 )
 from mer.modeling.utils.metrics import classification_metrics, va_to_russell4q
