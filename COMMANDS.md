@@ -14,6 +14,11 @@ python -m mer.modeling.embeddings \
 # MERGE
 python -m mer.modeling.embeddings \
   --dataset-name MERGE
+
+# With augments
+python -m mer.modeling.embeddings \
+  --dataset-name PMEmo \ 
+  --augment shift 
 ```
 
 ## Training
@@ -115,6 +120,29 @@ python -m mer.modeling.train \
   --hidden-dim 128 \
   --dropout 0.2 \
   --patience 15
+```
+
+### Augments
+Possible augments: shift, gain, reverb, lowpass, highpass, bandpass, pitch_shift
+```bash
+python -m mer.modeling.train \
+  --dataset-name PMEmo \
+  --prediction-mode VA \
+  --kfolds 5 \
+  --epochs 100 \
+  --batch-size 8 \
+  --lr 0.001 \
+  --hidden-dim 128 \
+  --dropout 0.2 \
+  --patience 15 \
+  --loss-type ccc \
+  --labels-scale norm \
+  --test-size 0.1 \
+  --seed 42 \
+  --augments shift \
+  --augments gain \
+  --augment-size 0.3
+
 ```
 
 ## Evaluation
@@ -300,3 +328,13 @@ python -m mer.modeling.compare \
 streamlit run app.py
 ```
 
+## Hyperparameter optimization
+```bash
+python -m mer.modeling.optimize \ 
+  --dataset-name pmemo \ 
+  --prediction-mode VA
+
+python -m mer.modeling.optimize \ 
+  --dataset-name merge \ 
+  --prediction-mode Russell4Q 
+```
