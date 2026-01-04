@@ -1,0 +1,161 @@
+# DEAM + VA + BiGRU
+python -m mer.modeling.optimize \
+  --dataset-name DEAM \
+  --prediction-mode VA \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm \
+  --loss-type ccc
+
+# DEAM + Russell4Q + BiGRU (bez --loss-type, bo i tak ignorowane)
+python -m mer.modeling.optimize \
+  --dataset-name DEAM \
+  --prediction-mode Russell4Q \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm
+
+ # PMEmo + VA + BiGRU
+python -m mer.modeling.optimize \
+  --dataset-name PMEmo \
+  --prediction-mode VA \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm \
+  --loss-type ccc
+
+# PMEmo + Russell4Q + BiGRU
+python -m mer.modeling.optimize \
+  --dataset-name PMEmo \
+  --prediction-mode Russell4Q \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm
+
+ # MERGE + VA + BiGRU
+python -m mer.modeling.optimize \
+  --dataset-name MERGE \
+  --prediction-mode VA \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --merge-split 70_15_15 \
+  --loss-type ccc
+
+# MERGE + Russell4Q + BiGRU
+python -m mer.modeling.optimize \
+  --dataset-name MERGE \
+  --prediction-mode Russell4Q \
+  --head BiGRU \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --merge-split 70_15_15
+
+# DEAM + VA + CNNLSTM
+python -m mer.modeling.optimize \
+  --dataset-name DEAM \
+  --prediction-mode VA \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm \
+  --loss-type ccc
+
+# DEAM + Russell4Q + CNNLSTM (bez --loss-type, bo i tak ignorowane)
+python -m mer.modeling.optimize \
+  --dataset-name DEAM \
+  --prediction-mode Russell4Q \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm
+
+ # PMEmo + VA + CNNLSTM
+python -m mer.modeling.optimize \
+  --dataset-name PMEmo \
+  --prediction-mode VA \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm \
+  --loss-type ccc
+
+# PMEmo + Russell4Q + CNNLSTM
+python -m mer.modeling.optimize \
+  --dataset-name PMEmo \
+  --prediction-mode Russell4Q \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --labels-scale norm
+
+ # MERGE + VA + CNNLSTM
+python -m mer.modeling.optimize \
+  --dataset-name MERGE \
+  --prediction-mode VA \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --merge-split 70_15_15 \
+  --loss-type ccc
+
+# MERGE + Russell4Q + CNNLSTM
+python -m mer.modeling.optimize \
+  --dataset-name MERGE \
+  --prediction-mode Russell4Q \
+  --head CNNLSTM \
+  --n-trials 20 \
+  --seed 42 \
+  --test-size 0.2 \
+  --epochs 50 \
+  --patience 15 \
+  --kfolds 5 \
+  --merge-split 70_15_15

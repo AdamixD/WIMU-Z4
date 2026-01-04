@@ -67,14 +67,14 @@ def _create_history_report_classification(name: str, history: list, report_dir: 
     history.to_csv(report_dir / f"{name}_history.csv", index=False)
 
     plt.figure(figsize=(10, 5))
-    plt.plot(history["epoch"], history["train_Accuracy"], label="train accuracy")
-    plt.plot(history["epoch"], history["valid_Accuracy"], label="validation accuracy")
+    plt.plot(history["epoch"], history["train_F1"], label="train F1")
+    plt.plot(history["epoch"], history["valid_F1"], label="validation F1")
     plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
+    plt.ylabel("F1 Score")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(report_dir / f"{name}_accuracy_curve.png")
+    plt.savefig(report_dir / f"{name}_f1_curve.png")
     plt.close()
 
 
@@ -361,7 +361,7 @@ def train_model_classification(
             f"{name}/Metrics", {"Accuracy": test_m["Accuracy"], "F1": test_m["F1"],}, epoch,
         )
 
-        score = test_m["Accuracy"]
+        score = test_m["F1"]
 
         if score > best_score:
             best_score = score
@@ -373,7 +373,7 @@ def train_model_classification(
                 logger.info(f"[{name}] Early stopping at epoch {epoch}")
                 break
 
-        logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_accuracy={score:.3f}")
+        logger.info(f"[{name}][epoch {epoch}] loss={train_loss:.4f} valid_F1={score:.3f}")
 
     _create_history_report_classification(name, history, report_dir)
     return model, best_m
@@ -553,7 +553,6 @@ def main(
         torch.save(model, model_path)
 
         metric_name = components["metric_name"]
-        # TODO add augmentations to summary
         save_training_summary(
             report_dir / "training_summary.json",
             model_path=model_path,
@@ -565,7 +564,9 @@ def main(
             validation_score=score[metric_name],
             test_score=test_score[metric_name],
             merge_split=merge_split,
-            hyperparameters=hyperparams
+            hyperparameters=hyperparams,
+            augments=augments if augments else None,
+            augment_size=augment_size if augments else None,
         )
 
     # ========================================================================
@@ -622,12 +623,12 @@ def main(
 
         avg_score = np.mean(fold_scores)
         std_score = np.std(fold_scores)
-        logger.info(f"K-fold validation {components["metric_name"]}: {avg_score:.4f} ± {std_score:.4f}")
+        logger.info(f"K-fold validation {components['metric_name']}: {avg_score:.4f} ± {std_score:.4f}")
 
         logger.info("Training final model on full training set...")
 
         data = prepare_datasets(dataset, manifest, split_data["train_indices"], split_data["test_indices"], components, batch_size, labels_scale, aug_manifests, augment_size)
-        logger.info(f"Final size: {len(data["train_loader"].dataset)} train, {len(data["test_loader"].dataset)} test")
+        logger.info(f"Final size: {len(data['train_loader'].dataset)} train, {len(data['test_loader'].dataset)} test")
 
         model = components["model_class"](in_dim=data["dataset"].input_dim, hidden_dim=hidden_dim, dropout=dropout).to(
             device
@@ -661,7 +662,6 @@ def main(
 
         writer.add_text("Test results", table)
 
-        # TODO add augmentations to summary
         save_training_summary(
             report_dir / "training_summary.json",
             model_path=model_path,
@@ -672,7 +672,9 @@ def main(
             test_score=score[components["metric_name"]],
             kfold_mean=avg_score,
             kfold_std=std_score,
-            hyperparameters=hyperparams
+            hyperparameters=hyperparams,
+            augments=augments if augments else None,
+            augment_size=augment_size if augments else None,
         )
 
     writer.close()

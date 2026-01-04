@@ -1,5 +1,4 @@
 from datetime import datetime
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Literal, Optional
@@ -9,6 +8,7 @@ from loguru import logger
 import numpy as np
 import optuna
 import pandas as pd
+import torch
 from torch.utils.tensorboard import SummaryWriter
 import typer
 
@@ -20,10 +20,11 @@ from mer.modeling.utils.misc import set_seed
 from mer.modeling.utils.train_utils import (
     prepare_kfold,
     prepare_kfold_dataset,
+    prepare_datasets,
     prepare_datasets_merge,
     get_mode_components
 )
-from mer.modeling.utils.report import save_splits
+from mer.modeling.utils.report import save_optimization_summary, save_splits, save_training_summary
 
 
 app = typer.Typer()
@@ -113,9 +114,10 @@ def make_objective(dataset_comp, base_args, study_dir: Path, head_name):
                     raise optuna.exceptions.TrialPruned()
             val_score = np.mean(fold_scores)
 
+        metric_name = components["metric_name"]
         writer.add_hparams(
             hparam_dict=hparams,
-            metric_dict={"ccc_mean": float(val_score)},
+            metric_dict={metric_name: float(val_score)},
         )
         writer.close()
 
@@ -154,13 +156,11 @@ def run(
     loss_type: Annotated[
         Literal["ccc", "mse", "hybrid"], typer.Option(case_sensitive=False)
     ] = "ccc",
-
     lr: Optional[float] = None,
     hidden_dim: Optional[int] = None,
     dropout: Optional[float] = None,
     batch_size: Optional[int] = None,
 ):
-
     set_seed(seed)
 
     # Validate prediction mode
@@ -200,7 +200,6 @@ def run(
         kfolds=kfolds,
         test_size=test_size,
         loss_type=loss_type,
-
         lr=lr,
         hidden_dim=hidden_dim,
         dropout=dropout,
@@ -208,10 +207,10 @@ def run(
     )
 
     dataset_comp = {
-            "dataset": dataset,
-            "dataset_name": dataset_name,
-            "prediction_mode": prediction_mode,
-            }
+        "dataset": dataset,
+        "dataset_name": dataset_name,
+        "prediction_mode": prediction_mode,
+    }
 
     if dataset_name == "MERGE":
         dataset_comp["merge_split"] = merge_split
@@ -235,16 +234,161 @@ def run(
     study.optimize(objective, n_trials=n_trials)
 
     best = study.best_trial
-    # TODO add dataset name and prediction mode and make function out of it to file report
-    result_summary = {
-        "best_value": best.value,
-        "best_params": best.params,
-        "n_trials": n_trials,
-    }
-    (study_dir / "best_hparams.json").write_text(json.dumps(result_summary, indent=2))
+    best_params = best.params
+    
+    metric_name = "CCC_mean" if prediction_mode == "VA" else "F1"
+    logger.success(f"Best {metric_name} = {best.value:.4f}")
+    logger.success(f"Best params = {best_params}")
 
-    logger.success(f"Best CCC_mean = {best.value:.4f}")
-    logger.success(f"Best params = {best.params}")
+    logger.info("Training final model with best hyperparameters...")
+    
+    final_dir = study_dir / "best_model"
+    final_dir.mkdir(parents=True, exist_ok=True)
+
+    final_args = SimpleNamespace(
+        epochs=epochs,
+        patience=patience,
+        device=device,
+        lr=best_params.get("lr", lr or 1e-4),
+        hidden_dim=best_params.get("hidden_dim", hidden_dim or 128),
+        dropout=best_params.get("dropout", dropout or 0.2),
+        batch_size=best_params.get("batch_size", batch_size or 6),
+        loss_type=loss_type,
+    )
+    
+    writer = SummaryWriter(log_dir=str(final_dir / "tensorboard"))
+    components = get_mode_components(prediction_mode, head)
+    
+    if dataset_name == "MERGE":
+        data = prepare_datasets_merge(dataset, merge_split, components, final_args.batch_size)
+        
+        model = components["model_class"](
+            in_dim=data["train_loader"].dataset.input_dim,
+            hidden_dim=final_args.hidden_dim,
+            dropout=final_args.dropout
+        ).to(device)
+        
+        # Add model graph to tensorboard
+        dummy_input = torch.randn(1, 1, data["train_loader"].dataset.input_dim).to(device)
+        writer.add_graph(model, dummy_input)
+        
+        train_kwargs = {
+            "name": "final",
+            "model": model,
+            "args": final_args,
+            "train_loader": data["train_loader"],
+            "test_loader": data["val_loader"],
+            "report_dir": final_dir,
+            "writer": writer,
+        }
+        
+        if prediction_mode == "VA":
+            train_kwargs["scatter"] = True
+        else:
+            train_kwargs["confusion"] = True
+        
+        model, val_score = components["train_fn"](**train_kwargs)
+        
+        # Evaluate on test set
+        if prediction_mode == "VA":
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, final_dir, scatter=True)
+        else:
+            test_score = components["eval_fn"](model, data["test_loader"], device, writer, final_dir, confusion=True)
+        
+        train_size = len(data["train_loader"].dataset)
+        val_size = len(data["val_loader"].dataset)
+        test_size_final = len(data["test_loader"].dataset)
+        
+        save_training_summary(
+            final_dir / "training_summary.json",
+            model_path=final_dir / "model.pth",
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=train_size,
+            validation_size=val_size,
+            test_size=test_size_final,
+            validation_score=val_score[components["metric_name"]],
+            test_score=test_score[components["metric_name"]],
+            merge_split=merge_split,
+            hyperparameters=best_params,
+        )
+        
+    else:  # DEAM/PMEmo
+        manifest_path = PROCESSED_DATA_DIR / dataset_name / "embeddings" / "manifest.csv"
+        manifest = pd.read_csv(manifest_path)
+        split_data = prepare_kfold(manifest, test_size, kfolds, seed)
+        
+        data = prepare_datasets(
+            dataset, manifest, 
+            split_data["train_indices"], 
+            split_data["test_indices"], 
+            components, 
+            final_args.batch_size, 
+            labels_scale
+        )
+        
+        model = components["model_class"](
+            in_dim=data["dataset"].input_dim,
+            hidden_dim=final_args.hidden_dim,
+            dropout=final_args.dropout
+        ).to(device)
+        
+        # Add model graph to tensorboard
+        dummy_input = torch.randn(1, 1, data["dataset"].input_dim).to(device)
+        writer.add_graph(model, dummy_input)
+        
+        train_kwargs = {
+            "name": "final",
+            "model": model,
+            "args": final_args,
+            "train_loader": data["train_loader"],
+            "test_loader": data["test_loader"],
+            "report_dir": final_dir,
+            "writer": writer,
+        }
+        
+        if prediction_mode == "VA":
+            train_kwargs["scatter"] = True
+        else:
+            train_kwargs["confusion"] = True
+        
+        model, test_score = components["train_fn"](**train_kwargs)
+        
+        train_size = len(data["train_loader"].dataset)
+        test_size_final = len(data["test_loader"].dataset)
+        
+        save_training_summary(
+            final_dir / "training_summary.json",
+            model_path=final_dir / "model.pth",
+            dataset_name=dataset_name,
+            prediction_mode=prediction_mode,
+            train_size=train_size,
+            test_size=test_size_final,
+            test_score=test_score[components["metric_name"]],
+            hyperparameters=best_params,
+        )
+    
+    # Save model
+    model_path = final_dir / "model.pth"
+    torch.save(model, model_path)
+    
+    writer.close()
+    
+    logger.success(f"Final model saved to {model_path}")
+    logger.success(f"Final {metric_name} = {test_score[components['metric_name']]:.4f}")
+    
+    # Save optimization summary with final model info
+    save_optimization_summary(
+        report_path=study_dir / "best_hparams.json",
+        dataset_name=dataset_name,
+        prediction_mode=prediction_mode,
+        best_value=best.value,
+        best_params=best_params,
+        n_trials=n_trials,
+        head=head,
+        seed=seed,
+        merge_split=merge_split if dataset_name == "MERGE" else None,
+    )
 
 
 if __name__ == "__main__":

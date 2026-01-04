@@ -94,7 +94,7 @@ def get_mode_components(prediction_mode, head_name):
             "model_class": model_class,
             "train_fn": train_model_classification,
             "eval_fn": evaluate_model_classification,
-            "metric_name": "Accuracy",
+            "metric_name": "F1",
         }
 
 def create_loader(items, config, batch_size, shuffle=False):
