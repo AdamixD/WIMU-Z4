@@ -434,3 +434,121 @@ python -m mer.modeling.optimize \
   --patience 15 \
   --kfolds 5 \
   --merge-split 70_15_15
+
+
+python -m mer.modeling.embeddings --dataset-name MERGE --augment shift
+python -m mer.modeling.embeddings --dataset-name MERGE --augment gain
+python -m mer.modeling.embeddings --dataset-name MERGE --augment reverb
+python -m mer.modeling.embeddings --dataset-name MERGE --augment lowpass
+python -m mer.modeling.embeddings --dataset-name MERGE --augment highpass
+python -m mer.modeling.embeddings --dataset-name MERGE --augment bandpass
+python -m mer.modeling.embeddings --dataset-name MERGE --augment pitch_shift
+
+python -m mer.modeling.train \
+  --dataset-name MERGE \
+  --prediction-mode VA \
+  --head BiGRU \
+  --kfolds 5 \
+  --epochs 50 \
+  --batch-size 4 \
+  --lr 6.097839109531521e-05 \
+  --hidden-dim 64 \
+  --dropout 0.2542703315240835 \
+  --patience 15 \
+  --loss-type ccc \
+  --labels-scale norm \
+  --test-size 0.1 \
+  --seed 42 \
+  --augments gain \
+  --augments shift \
+  --augments gain \
+  --augments reverb \
+  --augments lowpass \
+  --augments highpass \
+  --augments bandpass \
+  --augments pitch_shift \
+  --augment-size 0.3
+
+python -m mer.modeling.train \
+  --dataset-name MERGE \
+  --prediction-mode VA \
+  --head CNNLSTM \
+  --kfolds 5 \
+  --epochs 50 \
+  --batch-size 6 \
+  --lr 4.091220574443785e-05 \
+  --hidden-dim 64 \
+  --dropout 0.18764339456056545 \
+  --patience 15 \
+  --loss-type ccc \
+  --labels-scale norm \
+  --test-size 0.1 \
+  --seed 42 \
+  --augments gain \
+  --augments shift \
+  --augments gain \
+  --augments reverb \
+  --augments lowpass \
+  --augments highpass \
+  --augments bandpass \
+  --augments pitch_shift \
+  --augment-size 0.3
+
+python -m mer.modeling.train \
+  --dataset-name MERGE \
+  --prediction-mode Russell4Q \
+  --head BiGRU \
+  --kfolds 5 \
+  --epochs 50 \
+  --batch-size 4 \
+  --lr 6.432759992849896e-05 \
+  --hidden-dim 64 \
+  --dropout 0.12930163420191518 \
+  --patience 15 \
+  --loss-type ccc \
+  --labels-scale norm \
+  --test-size 0.1 \
+  --seed 42 \
+  --augments gain \
+  --augments shift \
+  --augments gain \
+  --augments reverb \
+  --augments lowpass \
+  --augments highpass \
+  --augments bandpass \
+  --augments pitch_shift \
+  --augment-size 0.3
+
+python -m mer.modeling.train \
+  --dataset-name MERGE \
+  --prediction-mode Russell4Q \
+  --head CNNLSTM \
+  --kfolds 5 \
+  --epochs 50 \
+  --batch-size 4 \
+  --lr 1.5254729458052598e-05 \
+  --hidden-dim 64 \
+  --dropout 0.2574269294896714 \
+  --patience 15 \
+  --loss-type ccc \
+  --labels-scale norm \
+  --test-size 0.1 \
+  --seed 42 \
+  --augments gain \
+  --augments shift \
+  --augments gain \
+  --augments reverb \
+  --augments lowpass \
+  --augments highpass \
+  --augments bandpass \
+  --augments pitch_shift \
+  --augment-size 0.3
+
+
+python -m mer.modeling.embeddings --dataset-name DEAM --augment shift
+python -m mer.modeling.embeddings --dataset-name DEAM --augment gain
+python -m mer.modeling.embeddings --dataset-name DEAM --augment reverb
+python -m mer.modeling.embeddings --dataset-name DEAM --augment lowpass
+python -m mer.modeling.embeddings --dataset-name DEAM --augment highpass
+python -m mer.modeling.embeddings --dataset-name DEAM --augment bandpass
+python -m mer.modeling.embeddings --dataset-name DEAM --augment pitch_shift

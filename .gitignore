@@ -1,6 +1,6 @@
 # Data
 /data/
-/reports/
+#/reports/
 
 .idea/
 
