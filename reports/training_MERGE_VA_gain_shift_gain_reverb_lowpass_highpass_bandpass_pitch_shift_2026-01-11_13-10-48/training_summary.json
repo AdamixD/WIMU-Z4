@@ -1,0 +1,31 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/training_MERGE_VA_gain_shift_gain_reverb_lowpass_highpass_bandpass_pitch_shift_2026-01-11_13-10-48/model.pth",
+  "dataset": "MERGE",
+  "prediction_mode": "VA",
+  "training_size": 8466,
+  "test_size": 532,
+  "merge_split": "70_15_15",
+  "validation_size": 532,
+  "validation_score": 0.4935342636224396,
+  "test_score": 0.47791959667548584,
+  "augments": [
+    "gain",
+    "shift",
+    "gain",
+    "reverb",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "pitch_shift"
+  ],
+  "augment_size": 0.3,
+  "hyperparameters": {
+    "epochs": 50,
+    "patience": 15,
+    "hidden_dim": 64,
+    "dropout": 0.18764339456056545,
+    "lr": 4.091220574443785e-05,
+    "batch_size": 6,
+    "loss_type": "ccc"
+  }
+}
