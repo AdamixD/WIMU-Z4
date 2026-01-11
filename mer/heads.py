@@ -42,7 +42,11 @@ class BiGRUClassificationHead(nn.Module):
 
 
 class CNNLSTMHead(nn.Module):
-    """CNN + LSTM head for VA regression."""
+    """
+    CNN + LSTM head for VA regression.
+
+    Based on https://www.researchgate.net/publication/383237611_MUSIC_EMOTION_RECOGNITION_AND_CLASSIFICATION_USING_HYBRID_CNN-LSTM_DEEP_NEURAL_NETWORK
+    """
 
     def __init__(
         self,
