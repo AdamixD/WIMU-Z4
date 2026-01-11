@@ -1,0 +1,29 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/training_DEAM_VA_gain_shift_gain_lowpass_highpass_bandpass_pitch_shift_2026-01-11_17-18-51/model.pth",
+  "dataset": "DEAM",
+  "prediction_mode": "VA",
+  "training_size": 5933,
+  "test_size": 213,
+  "test_score": 0.6599356652398412,
+  "kfold_validation_score_mean": 0.6042635650028204,
+  "kfold_validation_score_std": 0.014345966848609514,
+  "augments": [
+    "gain",
+    "shift",
+    "gain",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "pitch_shift"
+  ],
+  "augment_size": 0.3,
+  "hyperparameters": {
+    "epochs": 50,
+    "patience": 15,
+    "hidden_dim": 64,
+    "dropout": 0.12930163420191518,
+    "lr": 6.432759992849896e-05,
+    "batch_size": 4,
+    "loss_type": "ccc"
+  }
+}
