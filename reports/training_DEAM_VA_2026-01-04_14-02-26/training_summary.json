@@ -1,0 +1,19 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/training_DEAM_VA_2026-01-04_14-02-26/model.pth",
+  "dataset": "DEAM",
+  "prediction_mode": "VA",
+  "training_size": 1915,
+  "test_size": 213,
+  "test_score": 0.6177615230681166,
+  "kfold_validation_score_mean": 0.5942362124158181,
+  "kfold_validation_score_std": 0.015675806421466633,
+  "hyperparameters": {
+    "epochs": 5,
+    "patience": 5,
+    "hidden_dim": 128,
+    "dropout": 0.2,
+    "lr": 0.001,
+    "batch_size": 8,
+    "loss_type": "ccc"
+  }
+}

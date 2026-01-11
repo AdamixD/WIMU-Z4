@@ -1,0 +1,14 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_PMEmo_Russell4Q_2026-01-08_17-26-47/best_model/model.pth",
+  "dataset": "PMEmo",
+  "prediction_mode": "Russell4Q",
+  "training_size": 613,
+  "test_size": 154,
+  "test_score": 0.7337091689332884,
+  "hyperparameters": {
+    "lr": 6.097839109531521e-05,
+    "hidden_dim": 64,
+    "dropout": 0.2542703315240835,
+    "batch_size": 4
+  }
+}

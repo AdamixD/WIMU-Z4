@@ -1,0 +1,17 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_MERGE_VA_2026-01-07_14-43-42/best_model/model.pth",
+  "dataset": "MERGE",
+  "prediction_mode": "VA",
+  "training_size": 2490,
+  "test_size": 532,
+  "merge_split": "70_15_15",
+  "validation_size": 532,
+  "validation_score": 0.49847993587919426,
+  "test_score": 0.42689829444716454,
+  "hyperparameters": {
+    "lr": 4.091220574443785e-05,
+    "hidden_dim": 64,
+    "dropout": 0.18764339456056545,
+    "batch_size": 6
+  }
+}

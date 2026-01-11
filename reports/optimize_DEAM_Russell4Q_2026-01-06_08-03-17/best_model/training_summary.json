@@ -1,0 +1,14 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_DEAM_Russell4Q_2026-01-06_08-03-17/best_model/model.pth",
+  "dataset": "DEAM",
+  "prediction_mode": "Russell4Q",
+  "training_size": 1702,
+  "test_size": 426,
+  "test_score": 0.6979804760181383,
+  "hyperparameters": {
+    "lr": 6.432759992849896e-05,
+    "hidden_dim": 64,
+    "dropout": 0.12930163420191518,
+    "batch_size": 4
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/training_PMEmo_Russell4Q_gain_shift_gain_reverb_lowpass_highpass_bandpass_pitch_shift_2026-01-09_08-19-35/model.pth",
+  "dataset": "PMEmo",
+  "prediction_mode": "Russell4Q",
+  "training_size": 2346,
+  "test_size": 77,
+  "test_score": 0.8011533677443736,
+  "kfold_validation_score_mean": 0.718463444111599,
+  "kfold_validation_score_std": 0.05446286380338172,
+  "augments": [
+    "gain",
+    "shift",
+    "gain",
+    "reverb",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "pitch_shift"
+  ],
+  "augment_size": 0.3,
+  "hyperparameters": {
+    "epochs": 50,
+    "patience": 15,
+    "hidden_dim": 64,
+    "dropout": 0.2542703315240835,
+    "lr": 6.097839109531521e-05,
+    "batch_size": 4,
+    "loss_type": "cross_entropy"
+  }
+}

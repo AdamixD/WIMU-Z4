@@ -1,0 +1,14 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_PMEmo_VA_2026-01-08_14-58-57/best_model/model.pth",
+  "dataset": "PMEmo",
+  "prediction_mode": "VA",
+  "training_size": 613,
+  "test_size": 154,
+  "test_score": 0.7095795727855079,
+  "hyperparameters": {
+    "lr": 4.5975057847321686e-05,
+    "hidden_dim": 64,
+    "dropout": 0.2560204063533433,
+    "batch_size": 4
+  }
+}

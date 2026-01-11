@@ -1,0 +1,17 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_MERGE_Russell4Q_2026-01-07_17-10-15/best_model/model.pth",
+  "dataset": "MERGE",
+  "prediction_mode": "Russell4Q",
+  "training_size": 2490,
+  "test_size": 532,
+  "merge_split": "70_15_15",
+  "validation_size": 532,
+  "validation_score": 0.5716397478601671,
+  "test_score": 0.5293868713318584,
+  "hyperparameters": {
+    "lr": 1.5254729458052598e-05,
+    "hidden_dim": 64,
+    "dropout": 0.2574269294896714,
+    "batch_size": 4
+  }
+}

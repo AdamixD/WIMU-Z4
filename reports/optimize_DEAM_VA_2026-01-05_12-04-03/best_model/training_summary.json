@@ -1,0 +1,14 @@
+{
+  "model_path": "/Users/adamdabkowski/PycharmProjects/WIMU-Z4/reports/optimize_DEAM_VA_2026-01-05_12-04-03/best_model/model.pth",
+  "dataset": "DEAM",
+  "prediction_mode": "VA",
+  "training_size": 1702,
+  "test_size": 426,
+  "test_score": 0.7245010607763952,
+  "hyperparameters": {
+    "lr": 6.097839109531521e-05,
+    "hidden_dim": 64,
+    "dropout": 0.2542703315240835,
+    "batch_size": 4
+  }
+}
