@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 from random import randint
 
 from loguru import logger
@@ -156,10 +156,10 @@ def run(
     loss_type: Annotated[
         Literal["ccc", "mse", "hybrid"], typer.Option(case_sensitive=False)
     ] = "ccc",
-    lr: Optional[float] = None,
-    hidden_dim: Optional[int] = None,
-    dropout: Optional[float] = None,
-    batch_size: Optional[int] = None,
+    lr: float | None = None,
+    hidden_dim: int | None = None,
+    dropout: float | None = None,
+    batch_size: int | None = None,
 ):
     set_seed(seed)
 
