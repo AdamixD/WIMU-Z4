@@ -10,19 +10,20 @@ from random import randint
 from types import SimpleNamespace
 from typing import Annotated, Literal, List
 
-from loguru import logger
-from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix
 import torch
 import torch.nn as nn
+import typer
+from loguru import logger
+from matplotlib import pyplot as plt
+from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-import typer
 
-from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
+from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, \
+    REPORTS_DIR
 from mer.datasets.deam import DEAMDataset
 from mer.datasets.merge import MERGEDataset
 from mer.datasets.pmemo import PMEmoDataset

@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from loguru import logger
 import numpy as np
 import pandas as pd
 import torch
 import typer
+from loguru import logger
 
 from mer.config import DEFAULT_DEVICE
 from mer.modeling.embeddings import extract_embeddings

@@ -1,22 +1,25 @@
 from datetime import datetime
 from pathlib import Path
+from random import randint
 from types import SimpleNamespace
 from typing import Annotated, Literal
-from random import randint
 
-from loguru import logger
 import numpy as np
 import optuna
 import pandas as pd
 import torch
-from torch.utils.tensorboard import SummaryWriter
 import typer
+from loguru import logger
+from torch.utils.tensorboard import SummaryWriter
 
-from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, REPORTS_DIR
+from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR, \
+    REPORTS_DIR
 from mer.datasets.deam import DEAMDataset
-from mer.datasets.pmemo import PMEmoDataset
 from mer.datasets.merge import MERGEDataset
+from mer.datasets.pmemo import PMEmoDataset
 from mer.modeling.utils.misc import set_seed
+from mer.modeling.utils.report import save_optimization_summary, save_splits, \
+    save_training_summary
 from mer.modeling.utils.train_utils import (
     prepare_kfold,
     prepare_kfold_dataset,
@@ -24,8 +27,6 @@ from mer.modeling.utils.train_utils import (
     prepare_datasets_merge,
     get_mode_components
 )
-from mer.modeling.utils.report import save_optimization_summary, save_splits, save_training_summary
-
 
 app = typer.Typer()
 

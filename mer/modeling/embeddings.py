@@ -2,11 +2,11 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import librosa
-from loguru import logger
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 import typer
+from loguru import logger
+from tqdm import tqdm
 
 from mer.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, SAMPLE_RATE
 from mer.datasets.deam import DEAMDataset

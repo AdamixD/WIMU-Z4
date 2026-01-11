@@ -3,13 +3,13 @@
 import json
 from pathlib import Path
 
-from loguru import logger
 import numpy as np
 import pandas as pd
 import torch
+import typer
+from loguru import logger
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import typer
 
 from mer.config import PROCESSED_DATA_DIR, PROJ_ROOT, RAW_DATA_DIR
 from mer.datasets import DEAMDataset, MERGEDataset, PMEmoDataset
@@ -19,7 +19,8 @@ from mer.modeling.utils.data_loaders import (
     build_items_regression,
 )
 from mer.modeling.utils.metrics import classification_metrics, va_to_russell4q
-from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, set_seed
+from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification, \
+    set_seed
 
 
 def evaluate_va_model_as_russell4q(model, test_loader, device):
