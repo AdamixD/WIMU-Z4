@@ -19,6 +19,8 @@ def save_training_summary(
     kfold_std=None,
     augments: Optional[List[str]] = None,
     augment_size: Optional[float] = None,
+    head: Optional[str] = None,
+    best_trial_number: Optional[int] = None,
 ):
     data = {
         "model_path": str(model_path),
@@ -28,6 +30,10 @@ def save_training_summary(
         "test_size": test_size,
     }
 
+    if head is not None:
+        data["head"] = head
+    if best_trial_number is not None:
+        data["best_trial_number"] = best_trial_number
     if merge_split is not None:
         data["merge_split"] = merge_split
     if validation_size is not None:
@@ -81,6 +87,7 @@ def save_optimization_summary(
     n_trials: int,
     head: str,
     seed: int,
+    best_trial_number: Optional[int] = None,
     merge_split: Optional[str] = None,
 ):
     data = {
@@ -89,6 +96,7 @@ def save_optimization_summary(
         "head": head,
         "seed": seed,
         "n_trials": n_trials,
+        "best_trial_number": best_trial_number,
         "best_value": best_value,
         "best_params": best_params,
     }

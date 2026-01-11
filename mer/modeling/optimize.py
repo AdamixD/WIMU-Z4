@@ -237,8 +237,10 @@ def run(
     best_params = best.params
     
     metric_name = "CCC_mean" if prediction_mode == "VA" else "F1"
+    logger.success(f"Best trial: {best.number}")
     logger.success(f"Best {metric_name} = {best.value:.4f}")
     logger.success(f"Best params = {best_params}")
+    logger.success(f"Head: {head}")
 
     logger.info("Training final model with best hyperparameters...")
     
@@ -311,6 +313,8 @@ def run(
             test_score=test_score[components["metric_name"]],
             merge_split=merge_split,
             hyperparameters=best_params,
+            head=head,
+            best_trial_number=best.number,
         )
         
     else:  # DEAM/PMEmo
@@ -366,6 +370,8 @@ def run(
             test_size=test_size_final,
             test_score=test_score[components["metric_name"]],
             hyperparameters=best_params,
+            head=head,
+            best_trial_number=best.number,
         )
     
     # Save model
@@ -387,6 +393,7 @@ def run(
         n_trials=n_trials,
         head=head,
         seed=seed,
+        best_trial_number=best.number,
         merge_split=merge_split if dataset_name == "MERGE" else None,
     )
 
