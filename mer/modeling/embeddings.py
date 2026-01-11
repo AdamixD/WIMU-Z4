@@ -84,8 +84,8 @@ def main(
         Literal["DEAM", "PMEmo", "MERGE"], typer.Option(case_sensitive=False)
     ] = "DEAM",
     limit: int | None = None,
-   augment: Annotated[
-    Literal[None, "shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"], typer.Option(case_sensitive=False)
+    augment: Annotated[
+        Literal[None, "shift", "gain", "reverb", "lowpass", "highpass", "bandpass", "pitch_shift"], typer.Option(case_sensitive=False)
     ] = None
 ):
     extractor = LibrosaMFCCChroma()
