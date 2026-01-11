@@ -1,9 +1,9 @@
-import torch
-import torchaudio
-from torchaudio import transforms as T
-import torchaudio.functional as F
-import numpy as np
 import random
+
+import numpy as np
+import torch
+import torchaudio.functional as F
+
 
 def np_to_torch_waveform(y: np.ndarray) -> torch.Tensor:
     """Convert 1D numpy audio to torch tensor (1, n_samples)."""

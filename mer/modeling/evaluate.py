@@ -5,14 +5,14 @@ Evaluation script for trained models with support for both VA regression and Rus
 from pathlib import Path
 from typing import Annotated, Literal
 
-from loguru import logger
-from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
 import torch
-from torch.utils.data import DataLoader
 import typer
+from loguru import logger
+from matplotlib import pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix
+from torch.utils.data import DataLoader
 
 from mer.config import DEFAULT_DEVICE, PROCESSED_DATA_DIR, RAW_DATA_DIR
 from mer.datasets.common import SongClassificationDataset, SongSequenceDataset

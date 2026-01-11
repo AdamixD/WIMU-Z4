@@ -1,5 +1,6 @@
-import numpy as np
 import random
+
+import numpy as np
 from sklearn.model_selection import train_test_split, KFold
 from torch import nn
 from torch.utils.data import DataLoader, Subset, ConcatDataset
@@ -8,16 +9,16 @@ from mer.datasets.common import (
     SongSequenceDataset,
     SongClassificationDataset,
 )
+from mer.heads import BiGRUHead, BiGRUClassificationHead, CNNLSTMHead, \
+    CNNLSTMClassificationHead
 from mer.modeling.utils.data_loaders import (
     build_items_merge_regression,
     build_items_merge_classification,
     build_items_regression,
     build_items_classification
 )
-
-from mer.heads import BiGRUHead, BiGRUClassificationHead, CNNLSTMHead, \
-    CNNLSTMClassificationHead
 from mer.modeling.utils.misc import pad_and_mask, pad_and_mask_classification
+
 
 def prepare_kfold(manifest, test_size=0.2, kfolds=5, seed=42):
     n_samples = len(manifest)
