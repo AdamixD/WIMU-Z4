@@ -42,6 +42,10 @@ Lista dostępnych komend znajduje się w pliku COMMANDS.md
 | Typ adnotacji        | Dynamiczne (per sekunda) |
 | Reprezentacja emocji | VA                       |
 
+*(audio)* Należy pobrać https://cvml.unige.ch/databases/DEAM/DEAM_audio.zip i rozpakować do katalogu `/data/raw/DEAM/audio/`
+
+*(adnotacje)* Należy pobrać https://cvml.unige.ch/databases/DEAM/DEAM_Annotations.zip i rozpakować do katalogu `/data/raw/DEAM/annotations/`.
+
 **PMEmo**
 
 | Parametr             | Wartość                  |
@@ -49,6 +53,8 @@ Lista dostępnych komend znajduje się w pliku COMMANDS.md
 | Liczba utworów       | 767                      |
 | Typ adnotacji        | Dynamiczne (per sekunda) |
 | Reprezentacja emocji | VA                       |
+
+Należy pobrać archiwum PMEmo2019.zip https://drive.google.com/drive/folders/1qDk6hZDGVlVXgckjLq9LvXLZ9EgK9gw0 i rozpakować do katalogu `/data/raw/PMEmo`.
 
 **MERGE**
 
@@ -59,6 +65,20 @@ Lista dostępnych komend znajduje się w pliku COMMANDS.md
 | Predefiniowane splity | 70/15/15 lub 40/30/30  |
 | Reprezentacja emocji  | VA lub Russell4Q       |
 
+Należy pobrać skompresowane dane udostępnione pod linkiem https://zenodo.org/records/13939205/files/MERGE_Audio_Complete.zip?download=1 i umienić w katalogu `/data/raw/MERGE`.
+
+## Augmentacje
+
+### Dostępne augmentacje
+| Augmentacja | Opis | Parametry |
+|-------------|------|-----------|
+| `shift` | Przesunięcie czasowe | max_frac=0.08 (8% długości) |
+| `gain` | Zmiana głośności | -6dB do +6dB |
+| `reverb` | Dodanie pogłosu | reverberance=50 |
+| `lowpass` | Filtr dolnoprzepustowy | cutoff=3000Hz |
+| `highpass` | Filtr górnoprzepustowy | cutoff=300Hz |
+| `bandpass` | Filtr pasmowy | 300-3000Hz |
+| `pitch_shift` | Zmiana wysokości tonu | -2 do +2 półtonów |
 
 ## Eksperymenty
 
@@ -102,15 +122,6 @@ W tym trybie etykiety VA dla zbiorów DEAM i PMEmo są mapowane do kwadrantów m
 | PMEmo        | 0.670       | 0.734         |
 | Merge        | 0.548       | 0.529         |
 
-### Augmentacje
-- shift – przesunięcie czasowe sygnału.
-- gain – zmiana głośności nagrania.
-- reverb – dodanie pogłosu do sygnału.
-- lowpass – zastosowanie filtru dolnoprzepustowego.
-- highpass – zastosowanie filtru górnoprzepustowego.
-- bandpass – filtr pasmowy przepuszczający wybrane częstotliwości.
-- pitch_shift – zmiana wysokości tonu nagrania.
-
 ### Wyniki
 Otrzymane wyniki na zbiorze testowym uzyskano przy treningu, w którym dla każdej augmentacji 30% oryginalnych danych było przetwarzanych w formie augmentowanej i dodawanych do zbioru treningowego.
 
@@ -125,7 +136,6 @@ Otrzymane wyniki na zbiorze testowym uzyskano przy treningu, w którym dla każd
 |--------------|-------|----------|
 | VA           | 0.4879 | 0.4779 |
 | Russell4Q    | 0.5614 | 0.5399 |
-
 
 ### Wnioski
 **Porównanie głów**
@@ -148,18 +158,36 @@ W zbiorach DEAM i PMEmo wartości VA zostały mapowane na kwadranty Russella, mi
 
 Dodanie augmentacji poprawia wyniki modeli, co jest szczególnie widoczne w przypadku zbioru PMEmo (poprawa o 7–11%). Może to wynikać z faktu, że jest to najmniejszy ze zbiorów (tylko 767 utworów), a wprowadzenie danych augmentowanych pozwoliło zwiększyć liczbę próbek treningowych. Dla zbioru Merge poprawa wyników jest natomiast jedynie nieznaczna, co prawdopodobnie wynika z jego dużej wielkości (3554 utworów). Wynika z tego, że stosowanie augmentacji jest szczególnie korzystne dla mniejszych zbiorów danych.
 
-### Aplikacja webowa
+**Porównanie z Essentia**
+Dla zbioru DEAM tryb VA model z Essentia (deam-msd-musicnn-2) otrzymał wynik CCC=0.756. Za pomocą głowy CNNLSTM uzyskaliśmy zbliżony wynik 0.725
+
+## Tensorboard
+![](docs/images/image10.png)
+
+## Aplikacja webowa
 
 **Funkcjonalności**
 
 1. **Ładowanie modeli** - wybór z dostępnych modeli .pth
-2. **Upload audio** - wgrywanie plików MP3/WAV
-3. **Wizualizacja VA** - wykres valence/arousal w czasie
-4. **Wizualizacja Russell4Q** - rozkład kwadrantów
-5. **Porównanie modeli** - analiza dwóch modeli jednocześnie
-6. **Odtwarzacz audio** - synchronizacja z wizualizacjami
+2. **Wgrywanie audio** - wgrywanie wybranego pliku MP3/WAV
+3. **Odtwarzanie audio** - odtwarzanie wybranego pliku MP3/WAV
+4. **Wizualizacja VA** - przebiegi oraz rozkład wartości valence/arousal w czasie dla ramek
+5. **Wizualizacja Russell4Q** - klasyfikacja oraz rozkład kwadrantów Russell4Q w czasie dla ramek
+6. **Porównanie modeli** - analiza dwóch modeli jednocześnie
+7. **Zapis wyników** - możliwość zapisu wyników przeprowadzonej analizy
 
 **Interfejs**
+
+![](docs/images/image1.png)
+![](docs/images/image2.png)
+![](docs/images/image3.png)
+![](docs/images/image4.png)
+![](docs/images/image5.png)
+![](docs/images/image6.png)
+![](docs/images/image7.png)
+![](docs/images/image8.png)
+![](docs/images/image9.png)
+
 
 
 
