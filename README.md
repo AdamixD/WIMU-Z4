@@ -5,6 +5,23 @@
 - Maciej Kozłowski
 - Adam Dąbkowski
 
+## Uruchomienie
+
+```bash
+# Klonowanie repozytorium
+git clone [<repository_url>](https://github.com/AdamixD/WIMU-Z4.git)
+cd WIMU-Z4
+
+# Utworzenie środowiska wirtualnego
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# lub: venv\Scripts\activate  # Windows
+
+# Instalacja zależności
+pip install -r requirements.txt
+```
+Lista dostępnych komend znajduje się w pliku COMMANDS.md
+
 ## Analiza literatury
 
 |Publikacja|Link|Komentarz|Kod|Wytrenowane modele|Metryki|Zasoby obliczeniowe|
@@ -15,19 +32,121 @@
 |**Pedro Lima Louro, Hugo Redinho, Ricardo Santos, Ricardo Malheiro, Renato Panda, Rui Pedro Paiva, 2025** *“MERGE — A Bimodal Audio-Lyrics Dataset for Static Music Emotion Recognition”*|[🔗](https://arxiv.org/abs/2407.06060)|Artykuł stanowi odpowiedź na brak publicznych, dużych i kontrolowanych jakościowo zbiorów bimodalnych audio+tekst dla MER. Autorzy przedstawiają trzy nowe zbiory: MERGE Audio, MERGE Lyrics oraz MERGE Bimodal, etykietowane w czterech ćwiartkach Russella (valence–arousal). Dane powstały półautomatycznie na bazie metadanych i klipów z bazy AllMusic, z kontrolą jakości i standaryzacją próbek. |❌|❌|F1 <br> RMSE <br> R²|❌|
 |**Essentia**|[🔗](https://essentia.upf.edu/models.html)|Serwis udostępnia pre-trenowane modele do analizy muzyki wraz z wagami, metadanymi i przykładami użycia.|✔️|✔️|Metryki są zróżnicowane w zależności od rozpatrywanego modelu|❌|
 
+## 4. Zbiory danych
 
-## Status realizacji
+**DEAM**
 
-✔️ Wykonano
+| Parametr | Wartość |
+|----------|---------|
+| Liczba utworów | 1802 |
+| Typ adnotacji | Dynamiczne (per sekunda) |
+| Reprezentacja emocji | VA |
 
-- Analiza wymagań i literatury z zakresu MER.
-- Analiza wybranych zbiorów danych (DEAM, emoMusic, MERGE) i przygotowanie środowiska.
-- Implementacja prototypu bazowego na danych pozbawionych dodatkowego przeprocesowania (czyszczenia i augmentacji). Prototyp umożliwia wczytanie pliku audio, jego analizę i zwrócenie predykcji (tryb VA).
-- Porównanie wyników otrzymanego prototypu z modelami dostępnymi w Essentia (tryb VA).
+**PMEmo**
 
-🚧 W trakcie realizacji
+| Parametr | Wartość |
+|----------|---------|
+| Liczba utworów | 767 |
+| Typ adnotacji | Dynamiczne (per sekunda) |
+| Reprezentacja emocji | VA |
 
-- Dostosowanie struktury repozytorium do szablonu *cookiecutter-data-science*
-- Integracja z tensorboard
-- Eksperymenty z różnymi architekturami modeli oraz analiza wpływu augmentacji danych
-- Opracowanie aplikacji webowej
+### MERGE
+
+**MERGE**
+
+| Parametr | Wartość |
+|----------|---------|
+| Liczba utworów | 3554 |
+| Typ adnotacji | Statyczne (cały utwór) |
+| Predefiniowane splity | 70/15/15 lub 40/30/30 |
+| Reprezentacja emocji | VA lub Russell4Q |
+
+
+## Eksperymenty
+
+### Metryki ewaluacji
+W eksperymentach wykorzystano następujące metryki:
+- **CCC (Concordance Correlation Coefficient)** - dla trybu VA, mierzy zgodność między predykcjami a wartościami rzeczywistymi, uwzględniając zarówno korelację jak i średnie wartości
+- **F1 Score (weighted)** - dla trybu Russell4Q, harmoniczna średnia precyzji i recall, ważona rozmiarem klas
+  
+###  Metodologia eksperymentów
+Każdy eksperyment składał się z dwóch faz:
+
+**Faza 1: Optymalizacja hiperparametrów**
+- 10 triali Optuna z algorytmem TPE
+- Walidacja k-fold (k=5) dla DEAM i PMEmo
+- Predefiniowane splity train/valid/test (70/15/15) dla MERGE
+- Metryka optymalizacji: CCC_mean (VA) lub F1 (Russell4Q)
+
+**Faza 2: Trening finalnego modelu**
+- Wykorzystanie najlepszych znalezionych hiperparametrów
+- Trening na pełnym zbiorze treningowym
+- Ewaluacja na zbiorze testowym
+
+### Wyniki eksperymentów
+Otrzymane wyniki eksperymentów na zbiorze testowym dla najlepszego modelu
+
+**Tryb VA**
+
+| Zbiór danych | Głowa BiGRU | Głowa CNNLSTM |
+|-------------|------------|--------------|
+| DEAM        |       0.637   |       0.725       |
+| PMEmo       |        0.646     |      0.710        |
+| Merge       |    0.470        |        0.427      |
+
+**Tryb Russell4Q**
+
+W tym trybie etykiety VA dla zbiorów DEAM i PMEmo są mapowane do kwadrantów modelu Russella.
+
+| Zbiór danych | Głowa BiGRU | Głowa CNNLSTM |
+|-------------|------------|--------------|
+| DEAM        |       0.623   |       0.698       |
+| PMEmo       |        0.670     |      0.734        |
+| Merge       |   0.548        |        0.529      |
+
+### Augmentacje
+- shift – przesunięcie czasowe sygnału.
+- gain – zmiana głośności nagrania.
+- reverb – dodanie pogłosu do sygnału.
+- lowpass – zastosowanie filtru dolnoprzepustowego.
+- highpass – zastosowanie filtru górnoprzepustowego.
+- bandpass – filtr pasmowy przepuszczający wybrane częstotliwości.
+- pitch_shift – zmiana wysokości tonu nagrania.
+
+#### Wyniki
+Otrzymane wyniki na zbiorze testowym uzyskano przy treningu, w którym dla każdej augmentacji 30% oryginalnych danych było przetwarzanych w formie augmentowanej i dodawanych do zbioru treningowego.
+
+**PMEmo**
+| Tryb / Model | BiGRU | CNNLSTM |
+|--------------|-------|----------|
+| VA           | 0.7160 | 0.7638 |
+| Russell4Q    | 0.7434 | 0.8012 |
+
+**Merge**
+| Tryb / Model | BiGRU | CNNLSTM |
+|--------------|-------|----------|
+| VA           | 0.4879 | 0.4779 |
+| Russell4Q    | 0.5614 | 0.5399 |
+
+
+### Wnioski
+**Porównanie głów**
+
+Głowa CNNLSTM osiąga zauważalnie lepsze wyniki niż BiGRU (przewaga 10-14%) na zbiorach DEAM i PMEmo w obu trybach, natomiast dla zbioru Merge lepsze rezultaty uzyskuje BiGRU. Wskazuje to, że w przypadku danych dynamicznych skuteczniejsza jest architektura CNNLSTM, która umożliwia lepsze modelowanie zależności czasowych. Z kolei dla danych statycznych korzystniejsza okazuje się prostsza architektura BiGRU, charakteryzująca się lepszą zdolnością do generalizacji.
+
+**Porównanie zbiorów danych**
+
+Dla zbioru Merge uzyskane wyniki są wyraźnie niższe, niezależnie od zastosowanego trybu, co wskazuje, że jest on najbardziej wymagającym z analizowanych zbiorów danych. Sugeruje to, że statyczne adnotacje emocji stanowią większe wyzwanie dla zastosowanych modeli, które znacznie lepiej radzą sobie z adnotacjami dynamicznymi. Prawdopodobnie wynika to z faktu, że statyczne etykiety, przypisane do całego utworu, nie pozwalają w pełni wykorzystać potencjału architektur sekwencyjnych, zaprojektowanych do modelowania zależności czasowych.
+
+Najwyższe wyniki uzyskano dla zbioru PMEmo, jednak różnice w porównaniu do zbioru DEAM są stosunkowo niewielkie. Może to wskazywać, że oba zbiory charakteryzują się podobnym poziomem trudności oraz spójnością adnotacji, a zastosowane modele efektywnie wykorzystują dynamiczną reprezentację emocji w obu przypadkach.
+
+**Porównanie trybów**
+
+Największe różnice między trybami VA i Russell4Q widoczne są dla zbioru Merge, gdzie lepsze wyniki uzyskano w trybie Russell4Q. Dla PMEmo Russell4Q również jest nieznacznie lepszy. Jedynie w zbiorze DEAM tryb VA daje nieco lepsze rezultaty.
+
+W zbiorach DEAM i PMEmo wartości VA zostały mapowane na kwadranty Russella, mimo to dyskretna reprezentacja zachowuje istotne informacje i pozwala modelom skutecznie uczyć się wzorców emocjonalnych.
+
+**Augmentacje**
+
+Dodanie augmentacji poprawia wyniki modeli, co jest szczególnie widoczne w przypadku zbioru PMEmo (poprawa o 7–11%). Może to wynikać z faktu, że jest to najmniejszy ze zbiorów (tylko 767 utworów), a wprowadzenie danych augmentowanych pozwoliło zwiększyć liczbę próbek treningowych. Dla zbioru Merge poprawa wyników jest natomiast jedynie nieznaczna, co prawdopodobnie wynika z jego dużej wielkości (3554 utworów). Wynika z tego, że stosowanie augmentacji jest szczególnie korzystne dla mniejszych zbiorów danych.
+

@@ -338,3 +338,8 @@ python -m mer.modeling.optimize \
   --dataset-name merge \ 
   --prediction-mode Russell4Q 
 ```
+
+## Tensorboard
+```bash
+tensorboard --logdir "reports"
+```
