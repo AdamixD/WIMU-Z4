@@ -32,34 +32,32 @@ Lista dostępnych komend znajduje się w pliku COMMANDS.md
 |**Pedro Lima Louro, Hugo Redinho, Ricardo Santos, Ricardo Malheiro, Renato Panda, Rui Pedro Paiva, 2025** *“MERGE — A Bimodal Audio-Lyrics Dataset for Static Music Emotion Recognition”*|[🔗](https://arxiv.org/abs/2407.06060)|Artykuł stanowi odpowiedź na brak publicznych, dużych i kontrolowanych jakościowo zbiorów bimodalnych audio+tekst dla MER. Autorzy przedstawiają trzy nowe zbiory: MERGE Audio, MERGE Lyrics oraz MERGE Bimodal, etykietowane w czterech ćwiartkach Russella (valence–arousal). Dane powstały półautomatycznie na bazie metadanych i klipów z bazy AllMusic, z kontrolą jakości i standaryzacją próbek. |❌|❌|F1 <br> RMSE <br> R²|❌|
 |**Essentia**|[🔗](https://essentia.upf.edu/models.html)|Serwis udostępnia pre-trenowane modele do analizy muzyki wraz z wagami, metadanymi i przykładami użycia.|✔️|✔️|Metryki są zróżnicowane w zależności od rozpatrywanego modelu|❌|
 
-## 4. Zbiory danych
+## Zbiory danych
 
 **DEAM**
 
-| Parametr | Wartość |
-|----------|---------|
-| Liczba utworów | 1802 |
-| Typ adnotacji | Dynamiczne (per sekunda) |
-| Reprezentacja emocji | VA |
+| Parametr             | Wartość                  |
+|----------------------|--------------------------|
+| Liczba utworów       | 1802                     |
+| Typ adnotacji        | Dynamiczne (per sekunda) |
+| Reprezentacja emocji | VA                       |
 
 **PMEmo**
 
-| Parametr | Wartość |
-|----------|---------|
-| Liczba utworów | 767 |
-| Typ adnotacji | Dynamiczne (per sekunda) |
-| Reprezentacja emocji | VA |
-
-### MERGE
+| Parametr             | Wartość                  |
+|----------------------|--------------------------|
+| Liczba utworów       | 767                      |
+| Typ adnotacji        | Dynamiczne (per sekunda) |
+| Reprezentacja emocji | VA                       |
 
 **MERGE**
 
-| Parametr | Wartość |
-|----------|---------|
-| Liczba utworów | 3554 |
-| Typ adnotacji | Statyczne (cały utwór) |
-| Predefiniowane splity | 70/15/15 lub 40/30/30 |
-| Reprezentacja emocji | VA lub Russell4Q |
+| Parametr              | Wartość                |
+|-----------------------|------------------------|
+| Liczba utworów        | 3554                   |
+| Typ adnotacji         | Statyczne (cały utwór) |
+| Predefiniowane splity | 70/15/15 lub 40/30/30  |
+| Reprezentacja emocji  | VA lub Russell4Q       |
 
 
 ## Eksperymenty
@@ -69,7 +67,7 @@ W eksperymentach wykorzystano następujące metryki:
 - **CCC (Concordance Correlation Coefficient)** - dla trybu VA, mierzy zgodność między predykcjami a wartościami rzeczywistymi, uwzględniając zarówno korelację jak i średnie wartości
 - **F1 Score (weighted)** - dla trybu Russell4Q, harmoniczna średnia precyzji i recall, ważona rozmiarem klas
   
-###  Metodologia eksperymentów
+### Metodologia eksperymentów
 Każdy eksperyment składał się z dwóch faz:
 
 **Faza 1: Optymalizacja hiperparametrów**
@@ -88,21 +86,21 @@ Otrzymane wyniki eksperymentów na zbiorze testowym dla najlepszego modelu
 
 **Tryb VA**
 
-| Zbiór danych | Głowa BiGRU | Głowa CNNLSTM |
-|-------------|------------|--------------|
-| DEAM        |       0.637   |       0.725       |
-| PMEmo       |        0.646     |      0.710        |
-| Merge       |    0.470        |        0.427      |
+| Zbiór danych | Głowa BiGRU   | Głowa CNNLSTM |
+|--------------|---------------|---------------|
+| DEAM         | 0.637         | 0.725         |
+| PMEmo        | 0.646         | 0.710         |
+| Merge        | 0.470         | 0.427         |
 
 **Tryb Russell4Q**
 
 W tym trybie etykiety VA dla zbiorów DEAM i PMEmo są mapowane do kwadrantów modelu Russella.
 
 | Zbiór danych | Głowa BiGRU | Głowa CNNLSTM |
-|-------------|------------|--------------|
-| DEAM        |       0.623   |       0.698       |
-| PMEmo       |        0.670     |      0.734        |
-| Merge       |   0.548        |        0.529      |
+|--------------|-------------|---------------|
+| DEAM         | 0.623       | 0.698         |
+| PMEmo        | 0.670       | 0.734         |
+| Merge        | 0.548       | 0.529         |
 
 ### Augmentacje
 - shift – przesunięcie czasowe sygnału.
@@ -113,7 +111,7 @@ W tym trybie etykiety VA dla zbiorów DEAM i PMEmo są mapowane do kwadrantów m
 - bandpass – filtr pasmowy przepuszczający wybrane częstotliwości.
 - pitch_shift – zmiana wysokości tonu nagrania.
 
-#### Wyniki
+### Wyniki
 Otrzymane wyniki na zbiorze testowym uzyskano przy treningu, w którym dla każdej augmentacji 30% oryginalnych danych było przetwarzanych w formie augmentowanej i dodawanych do zbioru treningowego.
 
 **PMEmo**
@@ -149,4 +147,19 @@ W zbiorach DEAM i PMEmo wartości VA zostały mapowane na kwadranty Russella, mi
 **Augmentacje**
 
 Dodanie augmentacji poprawia wyniki modeli, co jest szczególnie widoczne w przypadku zbioru PMEmo (poprawa o 7–11%). Może to wynikać z faktu, że jest to najmniejszy ze zbiorów (tylko 767 utworów), a wprowadzenie danych augmentowanych pozwoliło zwiększyć liczbę próbek treningowych. Dla zbioru Merge poprawa wyników jest natomiast jedynie nieznaczna, co prawdopodobnie wynika z jego dużej wielkości (3554 utworów). Wynika z tego, że stosowanie augmentacji jest szczególnie korzystne dla mniejszych zbiorów danych.
+
+### Aplikacja webowa
+
+**Funkcjonalności**
+
+1. **Ładowanie modeli** - wybór z dostępnych modeli .pth
+2. **Upload audio** - wgrywanie plików MP3/WAV
+3. **Wizualizacja VA** - wykres valence/arousal w czasie
+4. **Wizualizacja Russell4Q** - rozkład kwadrantów
+5. **Porównanie modeli** - analiza dwóch modeli jednocześnie
+6. **Odtwarzacz audio** - synchronizacja z wizualizacjami
+
+**Interfejs**
+
+
 
